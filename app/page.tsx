@@ -56,6 +56,7 @@ import {
 import { Empty, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ImportDialog } from '@/components/import-dialog';
+import { HeroDemoVideo } from '@/components/hero-demo-video';
 import {
   analyze,
   csvRows,
@@ -447,16 +448,21 @@ export default function Home() {
           </Empty>
         ) : !current ? (
           <>
-            <div className="eyebrow">TUS RELACIONES, EN PERSPECTIVA</div>
-            <h1>
-              Lo que cambia.
-              <br />
-              <span>Lo que importa.</span>
-            </h1>
-            <p className="intro">
-              Descubrí quién ya no te sigue, quién llegó y qué relaciones siguen
-              siendo mutuas.
-            </p>
+            <section className="welcome-hero" aria-labelledby="welcome-title">
+              <div className="welcome-hero-copy">
+                <div className="eyebrow">TUS RELACIONES, EN PERSPECTIVA</div>
+                <h1 id="welcome-title">
+                  Lo que cambia.
+                  <br />
+                  <span>Lo que importa.</span>
+                </h1>
+                <p className="intro">
+                  Descubrí quién ya no te sigue, quién llegó y qué relaciones
+                  siguen siendo mutuas.
+                </p>
+              </div>
+              <HeroDemoVideo />
+            </section>
             <section className="welcome-grid">
               <div className="import-card">
                 <span className="icon-box">
