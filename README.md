@@ -1,58 +1,84 @@
 # FollowLens
 
-Analizador de relaciones de Instagram. React + TypeScript sobre Vite/Vinext. Interfaz en español, sin API de Instagram ni backend para datos personales.
+Analizador de relaciones de Instagram. React 19 + TypeScript sobre Vite y Vinext. Interfaz en español, procesamiento 100% en el navegador, sin credenciales, sin API de Instagram y sin servidores para datos personales.
 
-## Desarrollo
-
-Requiere Node.js 24 o superior.
-
-```sh
-npm install
-npm run dev
-```
-
-En Windows, si PowerShell restringe los scripts, usar `npm.cmd` en lugar de `npm`.
-
-```sh
-npm run build
-npx tsc --noEmit
-node --test lib/relationships.test.ts
-```
-
-## Uso
-
-1. Exportar seguidores y seguidos en JSON con período **Todo el tiempo** desde Instagram.
-2. Importar un ZIP, o seleccionar juntos `followers_1.json`, todas las partes adicionales y `following.json`.
-3. Indicar el usuario propietario y la fecha de exportación. El propietario no siempre aparece en esos archivos: el usuario debe asignarlo correctamente.
-4. Elegir si conservar la importación en IndexedDB. Por defecto solo se mantiene en memoria.
-5. Importar otra fecha de la misma cuenta para comparar cambios. Hay un ejemplo ficticio de tres fechas que nunca se guarda.
+---
 
 ## Capacidades
 
-- Seguidores, seguidos, mutuos, relaciones sin reciprocidad.
-- Seguidores nuevos/perdidos, seguimientos nuevos/perdidos y cambios en mutuos entre fechas.
-- Filtro de seguidores perdidos a quienes todavía seguís.
-- Búsqueda, paginación, evolución, historial por cuenta y exportación CSV del filtro activo.
-- Historial local opcional, separado por cuenta, con eliminación individual.
-- Manejo de JSON vacíos legítimos, formatos planos o envueltos, partes múltiples y nombres normalizados.
+- **Mapeo de Relaciones:** Seguidores, seguidos, mutuos y relaciones no recíprocas (quién no te sigue y a quién no seguís).
+- **Análisis Temporal entre Exportaciones:** Seguidores nuevos/perdidos, seguimientos nuevos/perdidos y cambios en mutuos entre fechas.
+- **Filtros Específicos:** Filtro para seguidores perdidos a quienes todavía seguís.
+- **Exploración y Exportación:** Búsqueda, paginación, timeline por cuenta y exportación a CSV con codificación UTF-8 segura.
+- **Historial Local Opcional:** Persistencia voluntaria en IndexedDB por cuenta, con eliminación individual.
+- **Compatibilidad Amplia:** Soporte para formatos planos o envueltos de Instagram, múltiples archivos (`followers_1.json`, `followers_2.json`, etc.) y normalización de nombres de usuario.
+- **Modo Demostración:** Datos sintéticos interactivos precargados para explorar las funciones sin requerir archivos reales.
 
-## Privacidad y límites
+---
 
-Los archivos se leen localmente. Solo se extraen los JSON de seguidores y seguidos; mensajes y medios no se analizan. La aplicación no envía datos importados a servidores ni utiliza analítica o fuentes externas. El sitio hospedado sirve los recursos de la interfaz; no recibe los archivos. El acceso a la edición privada hospedada puede requerir la sesión de Sites, nunca la de Instagram.
+## Privacidad y Límites de Seguridad
 
-El historial guardado pertenece al navegador y origen del sitio. No se sincroniza y desaparece al borrar los datos del navegador. Conservar las exportaciones originales.
+- **Procesamiento 100% Local:** Los archivos se analizan íntegramente en la memoria del navegador. Ningún dato personal o lista de seguidores se envía a servidores externos.
+- **Filtrado Selectivo de Archivos:** Al importar un ZIP, el descompresor solo extrae los JSON de seguidores y seguidos; fotos, videos, historias y mensajes privados se ignoran y descartan automáticamente.
+- **Sin Analítica:** La aplicación no incluye rastreadores, telemetría ni fuentes externas que capturen datos del usuario.
+- **Persistencia Voluntaria:** El historial se conserva únicamente si el usuario lo solicita explícitamente en IndexedDB (`followlens-local`). Los datos residen en el navegador y desaparecen al limpiar los datos de navegación.
+- **Límites DoS:** Máximo 200 MB por lote de entrada y 30 MB de JSON descompreso (hasta 1.000 archivos).
+- **Modelo Observacional:** Los cambios reflejan observaciones matemáticas entre exportaciones fechadas, no eventos en vivo ni notificaciones instantáneas de unfollow.
 
-Máximo 200 MB de archivos de entrada y 30 MB de JSON de relaciones descomprimidos. Importar un ZIP por vez. Rechaza listas faltantes, formatos no compatibles, duplicados ambiguos y saltos detectables en las partes. No puede detectar una última parte omitida: se pide confirmar que el archivo está completo.
+---
 
-Los cambios son observaciones entre exportaciones, no fechas exactas ni motivos de unfollow. Renombres, desactivaciones y exports incompletos pueden parecer pérdidas. Las métricas no se actualizan en vivo. No se infieren relaciones entre terceros ni intenciones personales.
+## Uso
 
-## Organización
+1. Solicitar la descarga de datos desde Instagram seleccionando formato **JSON** y período **Todo el tiempo**.
+2. Importar el archivo ZIP completo, o seleccionar juntos `followers_1.json` (y todas sus partes) junto con `following.json`.
+3. Indicar el usuario propietario de la cuenta y la fecha de exportación.
+4. *(Opcional)* Activar la casilla para conservar la importación en IndexedDB si se desean realizar comparaciones históricas futuras.
+5. Importar una segunda exportación más reciente de la misma cuenta para visualizar y analizar los cambios.
 
-- `app/page.tsx`: experiencia y estado de sesión.
-- `components/import-dialog.tsx`: importación y consentimiento de persistencia.
-- `lib/importer.ts`: ZIP/JSON, formatos y límites.
-- `lib/relationships.ts`: comparaciones, historial y CSV.
-- `lib/storage.ts`: IndexedDB.
-- `lib/relationships.test.ts`: pruebas de cálculos e importación.
+---
 
-La compilación y las pruebas se verifican por separado. No se ha completado una prueba interactiva en navegador en este entorno.
+## Desarrollo y Validación
+
+Requiere **Node.js 24** o superior.
+
+```sh
+# Instalar dependencias
+npm install
+
+# Servidor de desarrollo (Vite / Vinext con HMR)
+npm run dev
+```
+
+En entornos Windows PowerShell con restricciones de ejecución, usar `npm.cmd` en lugar de `npm`.
+
+### Comandos de Validación
+
+```sh
+# Pruebas unitarias (14 tests con runner nativo de Node.js)
+npm test
+
+# Verificación de tipos TypeScript
+npm run typecheck
+
+# Compilación de producción
+npm run build
+```
+
+---
+
+## Documentación Técnica y Agentes de IA
+
+Para desarrolladores, colaboradores y agentes de codificación automatizados (AI Agents):
+- **Guía Operativa para Agentes:** [AGENTS.md](AGENTS.md)
+- **Base de Conocimiento Estructurada (OKF v0.2):** [docs/knowledge/index.md](docs/knowledge/index.md)
+- **Adaptadores de Modelos:** [CLAUDE.md](CLAUDE.md) y [GEMINI.md](GEMINI.md)
+
+---
+
+## Licencia / License
+
+El código fuente de FollowLens está disponible públicamente bajo los términos de la licencia **PolyForm Noncommercial License 1.0.0** (*source-available*).
+
+- **Usos Permitidos:** Se permite el uso personal, estudio, investigación, modificación y experimentación sin fines comerciales bajo los términos de la licencia.
+- **Restricción Comercial:** Queda expresamente prohibida la explotación comercial, venta o distribución como parte de un servicio o producto comercial sin autorización previa y por escrito del titular de los derechos de autor.
+- Consulta el archivo [LICENSE](LICENSE) para conocer los términos legales completos y [NOTICE](NOTICE) para la atribución oficial de copyright.
