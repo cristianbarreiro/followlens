@@ -10,7 +10,7 @@ tags:
   - vinext
   - oxlint
   - verification
-timestamp: '2026-10-11T02:00:00-03:00'
+timestamp: '2026-10-11T18:40:00-03:00'
 lifecycle: stable
 ---
 
@@ -34,6 +34,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 34 tests unitarios nativos (0 suites).            |
 | `npm run test:e2e`  | Ejecuta regresiones de importación en Chromium real.      | Playwright Test                                   | Inicia Vinext local; requiere Chromium instalado. |
 | `npm run benchmark:importer` | Mide escenarios sintéticos del pipeline de importación. | Node.js 24 + `--expose-gc` | Opt-in; informa tiempos y snapshots aproximados de memoria, sin umbrales. |
+| `npm run benchmark:importer:browser` | Mide importaciones sintéticas medianas y cercanas al límite en Chromium. | Playwright Test + Chromium | Ejecución independiente; no forma parte de `test:e2e`. |
 | `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.           |
 | `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.          |
 | `npm run lint`      | Ejecuta el análisis estático de código.                   | `oxlint`                                          | Véase Sección 4 para diagnóstico de linter.       |
@@ -115,6 +116,25 @@ Corridas locales de referencia (Windows, Node.js 24.16.0, V8 13.6.233.17) regist
 Los tiempos son muestras locales orientativas, no garantías ni umbrales de CI. El benchmark informa snapshots de `heapUsed`, RSS, `external` y `arrayBuffers` antes/después de etapas; las operaciones síncronas pueden impedir el muestreo de su pico real. El ZIP de 32 MiB se materializa intencionalmente en el proceso Node (incluidas copias del fixture/File), así que su RSS no representa memoria de un navegador que opera con un `File` local; solo el registro de rangos verifica que no se soliciten bytes multimedia. Para el payload exacto, RSS pasó de ~77 MiB antes a ~138 MiB inmediatamente después; tras ceder el event loop y forzar GC, volvió a ~78 MiB y `arrayBuffers` a ~0,32 MiB, sin crecimiento acumulado tras una segunda importación. No interpretes `heapUsed` de Node como memoria total del navegador. En Chromium real (Playwright 1.64.0, Chromium 156.0.8078.4), dos corridas de importación UI JSON pequeña sintética midieron 114–162 ms; el cronómetro va desde liberar la lectura simulada del archivo hasta que Playwright observa el cierre del diálogo, por lo que incluye latencia del test harness. `performance.memory` informó 37,3 MB de heap JS antes y después y un límite de 3.760 MB. Esa API es específica de Chromium y aproximada; el caso de navegador no representa la carga cercana al límite.
 
 Los escenarios medianos completan el import en decenas de milisegundos y el ZIP con 32 MiB irrelevantes en ~1 ms, por lo que no se retuvo ninguna optimización de producción. Se evaluó una escritura DEFLATE directa al buffer declarado; aunque el microbenchmark aislado fue más rápido, la importación completa exacta al límite no mejoró de forma significativa y las mediciones de memoria no justificaron cambiar el algoritmo existente. El stress test de 30 MiB es opt-in y no se agrega a `npm test`.
+
+### Validación de escala en Chromium (Fase 10)
+
+Ejecutá `npm run benchmark:importer:browser` con Node.js 24+ y Chromium instalado (`npx playwright install chromium`). Este comando usa un config Playwright separado y no agrega casos pesados a `npm run test:e2e`. Levanta el servidor Vinext local y recorre el diálogo de importación real. Todos los usernames y ZIP son sintéticos; el payload de límite se crea con una lista pequeña JSON válida más espacios JSON en blanco, sin datos personales. El benchmark comprueba el tamaño sin comprimir acumulado de las entradas relacionales y el comprimido declarado por el directorio central; no confunde el tamaño del contenedor ZIP con esos presupuestos.
+
+En Windows, Node.js 24.16.0 y Chromium 156.0.8078.4, una corrida independiente registró:
+
+| Escenario | ZIP / datos relacionales | Resultado UI y relaciones esperadas/reales | Tiempo Chromium de importación | Hilo principal |
+|---|---|---|---:|---|
+| JSON mediano | 23.792 B; 23.414 B comprimidos / 504.030 B descomprimidos | 5.000 seguidores, 4.000 seguidos, 2.500 mutuos y 1.500 no recíprocos; esperado = real | 251,6 ms | 1 tarea larga; máximo 133 ms; `JSON.parse`: 7,1 ms |
+| Límite acumulado exacto | 31.183 B; 30.805 B comprimidos / 31.457.280 B descomprimidos (30 MiB) | Importación exitosa; 1 seguidor, 0 seguidos, 0 mutuos y 0 no recíprocos; esperado = real | 680,6 ms | 3 tareas largas; máximo 456 ms; `JSON.parse`: 22,1 ms |
+| Límite + 1 byte | 31.183 B; 30.805 B comprimidos / 31.457.281 B descomprimidos | Error controlado, sin dashboard ni importación parcial | 88,0 ms hasta el alert | 0 tareas largas; no llegó a `JSON.parse` |
+| Recuperación | ZIP sintético pequeño; 164 B descomprimidos | Tras el error, importación exitosa; 1 seguidor y 1 seguido; esperado = real | 200,9 ms | 1 tarea larga; máximo 160 ms |
+
+El intervalo Chromium empieza en el evento real del botón de análisis y termina cuando un `MutationObserver` ve el resultado de éxito o el alert controlado. El tiempo del harness Playwright se registra aparte desde antes del click hasta que resuelven sus aserciones: en esa corrida fue 468,2 ms para el caso mediano, 804,2 ms para el límite exacto, 294,9 ms para el error y 337,4 ms para la recuperación. Esos intervalos no son equivalentes ni se usan como umbrales de CI. La instrumentación además mide por separado la suma de duración de `JSON.parse`, las tareas largas si `PerformanceObserver` soporta `longtask`, y `performance.memory.usedJSHeapSize` cuando existe. El heap Chromium informado fue 39.600.000 bytes antes y después de cada escenario de esta corrida; esta API aproximada no refleja necesariamente asignaciones transitorias ni la memoria total del proceso.
+
+La corrida evidencia una tarea larga reproducible en el import válido de 30 MiB (la corrida final observó una de 456 ms; otra corrida previa registró 566 ms), aunque los datos relacionales son solo un registro y el parsing JSON instrumentado suma 22,1 ms. Por tanto, la cardinalidad de relaciones y el render de miles de filas no explican ese caso; el coste restante está en el procesamiento previo/alrededor del parseo (lectura selectiva, DEFLATE, CRC, decodificación y actualización de estado), que esta línea de base no separa por función. Es una pausa perceptible posible en el hilo principal al importar una entrada cerca del presupuesto, no un umbral universal. No se cambió producción: esta medición no identifica cuál subetapa del procesamiento debe optimizarse, y una intervención en descompresión o verificación sin perfilado de esa etapa arriesgaría las defensas de recursos e integridad. El exceso de 1 byte se rechaza antes de parsear y permite una importación válida posterior.
+
+La comprobación de solicitudes del benchmark solo permite HTTP/WebSocket del origen local de la app; en los cuatro flujos no se detectaron solicitudes externas ni errores de consola/página. Las métricas son de Chromium real pero de una sola máquina/corrida final, no representan todos los dispositivos; para el proceso Node y sus etapas aisladas, usá por separado `npm run benchmark:importer`. Ninguna lectura o medición usa datos reales.
 
 ---
 

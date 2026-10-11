@@ -14,6 +14,7 @@
     "test": "node --test lib/relationships.test.ts",
     "test:e2e": "playwright test",
     "benchmark:importer": "node --expose-gc scripts/importer-benchmark.ts",
+    "benchmark:importer:browser": "playwright test --config=playwright.browser-benchmark.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

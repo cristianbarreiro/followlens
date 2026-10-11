@@ -26,6 +26,7 @@ Operational adapter for Claude Code. FollowLens uses a single source of truth ar
 
 - `npm test`: Run 34 unit tests (`node --test lib/relationships.test.ts`).
 - `npm run benchmark:importer`: Run synthetic Node.js importer performance scenarios.
+- `npm run benchmark:importer:browser`: Run isolated medium/near-limit Chromium import scenarios.
 - `npm run typecheck`: Strict TypeScript check (`tsc --noEmit`).
 - `npm run build`: Production compilation (`vinext build`).
 - `npm run dev`: Development server (`vinext dev`).
