@@ -43,7 +43,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 
 La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
 
-### Cobertura Actual Comprobada (14 tests activos):
+### Cobertura Actual Comprobada (23 tests activos):
 1. Normalización de usernames (descarte de fórmulas de planilla `@`, `=`, `<script>`).
 2. Parsing de formatos planos, envueltos y resolución por `title` / URL.
 3. Rechazo de registros incompletos y soporte de listas vacías legítimas.
@@ -58,22 +58,18 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 12. Rechazo de partes intermedias faltantes en seguidores (ej. saltos 1 → 3).
 13. Rechazo de carpetas de cuentas duplicadas o múltiples archivos ZIP simultáneos.
 14. Rechazo de ZIP dañado y aceptación de archivos legítimos vacíos.
+15. Búsqueda y validación de EOCD con comentarios variables hasta la ventana máxima de 65.557 bytes.
+16. Detección de firma EOCD falsa dentro del comentario, ZIP truncado, cabeceras corruptas y ZIP multidisco.
+17. Extracción de entradas STORE y DEFLATE con verificación de tabla CRC32 (IEEE 802.3).
+18. Inconsistencia de encabezado local (LFH) y bit 3 con marcadores de datos legítimos.
+19. Rechazo de métodos no soportados, entradas cifradas y formato ZIP64 (por campos EOCD y locator).
+20. Rechazo preventivo de offsets corruptos, invasión del Directorio Central y discrepancias de tamaño.
+21. Detención temprana de descompresión ante bombas ZIP altamente comprimibles (protección DoS).
+22. Omisión comprobada de multimedia, verificando que los rangos binarios nunca se solicitan con `slice()`.
+23. Admisión de archivo ZIP simulado superior a 200 MB mediante rangos selectivos sin buffer real masivo.
 
 > [!NOTE]
-> **Datos de prueba:** Todos los tests operan sobre datos sintéticos generados en memoria con `zipSync` y `new File()`. No se leen ni requieren archivos reales del disco.
-
-### Pruebas Pendientes para la Evolución Incremental (Fase 3 y 4):
-Para la implementación del lector selectivo (Fase 3), se incorporará una batería de pruebas sintéticas en `lib/relationships.test.ts` que cubra:
-1. **Búsqueda y validación de EOCD:** Coincidencia exacta de fin de archivo con comentario cero y con comentario de tamaño variable (hasta 65.535 bytes); rechazo seguro de archivos sin firma EOCD o truncados.
-2. **Métodos de compresión y cifrado:** Descompresión correcta de entradas STORE (método 0) y DEFLATE (método 8); rechazo con error explicativo para métodos no soportados o entradas cifradas (bit 0 activo).
-3. **Detección y rechazo seguro de ZIP64:** Detección de marcadores `0xFFFF` / `0xFFFFFFFF` o locator `0x07064b50` y rechazo controlado con mensaje informativo, sin interpretar erróneamente campos de 32 bits.
-4. **Validación de límites y offsets:** Rechazo preventivo ante offsets calculados que apunten fuera de los límites físicos del archivo (`out of bounds`).
-5. **Omisión real de multimedia no deseada:** ZIP sintético con archivos ficticios de vídeo/fotos junto con `followers_1.json` y `following.json`, comprobando que los datos de medios nunca se lean ni se descompriman.
-6. **Representación sintética de archivo >200 MB:** Prueba que verifique la ausencia de rechazo artificial por tamaño de archivo **sin requerir instanciar un buffer real de cientos de megabytes en la memoria del test runner** (mediante simulación liviana de objeto `File`/`Blob`).
-7. **Integridad de partes y aislamiento:** Múltiples partes secuenciales de seguidores, detección de saltos (1 → 3), colisión de cuentas en carpetas internas y compatibilidad con JSONs sueltos.
-8. **Validación manual en navegador (Fase 4):** La verificación con la exportación real de ~232 MB se reservará para ensayos de rendimiento y consumo de memoria en navegador (Chrome/Firefox DevTools).
-
-*(No declarar que existen pruebas de navegador o E2E hasta que hayan sido implementadas en el repositorio).*
+> **Datos de prueba:** Todos los tests operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. No se leen ni requieren archivos reales del disco. La validación manual con la exportación real de ~232 MB en navegadores (Chrome/Firefox) se reserva para la Fase 4.
 
 ---
 

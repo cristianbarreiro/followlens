@@ -1,5 +1,5 @@
 ---
-applyTo: "lib/importer.ts, lib/relationships.ts, lib/relationships.test.ts, components/import-dialog.tsx"
+applyTo: "lib/importer.ts, lib/zip.ts, lib/relationships.ts, lib/relationships.test.ts, components/import-dialog.tsx"
 ---
 
 # Copilot Instruction: Data Import & Relationship Processing

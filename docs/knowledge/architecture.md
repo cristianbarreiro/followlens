@@ -42,7 +42,8 @@ components/
 └── ui/                          ── Primitives visuales basados en shadcn/ui (radix / base-ui)
 
 lib/
-├── importer.ts                  ── Descompresión con fflate, validación de límites e integridad de partes
+├── importer.ts                  ── Orquestación de importación, integración de zip.ts, validación de partes
+├── zip.ts                       ── Lector ZIP selectivo por rangos (EOCD, CD, CRC32, streaming DEFLATE acotado)
 ├── relationships.ts             ── Lógica pura de conjuntos, normalización de usernames, timeline y CSV
 ├── storage.ts                   ── Adaptador de persistencia local en IndexedDB (base 'followlens-local')
 ├── demo.ts                      ── Generador de snapshots sintéticos para exploración sin archivos
@@ -54,19 +55,18 @@ lib/
 
 ## 4. HOW — Flujo Actual vs. Arquitectura Objetivo
 
-### Estado Actual de la Implementación (`lib/importer.ts`)
+### Estado de la Implementación (`lib/zip.ts` y `lib/importer.ts`)
 
-Actualmente, la importación se ejecuta de manera monolítica en memoria:
-1. Recibe los archivos seleccionados por el usuario (`File[]`).
-2. Aplica una comprobación rígida: `files.reduce(...) > 200 MB` provoca error inmediato.
-3. Para archivos ZIP, carga todo el archivo en memoria mediante `new Uint8Array(await zipped[0].arrayBuffer())`.
-4. Invoca `fflate.unzip(bytes, { filter }, callback)` para descomprimir en un objeto `Record<string, Uint8Array>`.
-5. Acumula las entradas extraídas y aplica `JSON.parse(strFromU8(bytes)...)`.
-6. Valida que no falten partes intermedias (`followers_1.json`, `followers_2.json`) y retorna el resultado.
+En la Fase 3, el pipeline de importación fue desacoplado mediante lectura selectiva por rangos:
+1. Recibe los archivos seleccionados por el usuario (`File[]`), admitiendo exportaciones completas sin rechazo por tamaño de archivo.
+2. Para archivos ZIP, localiza el registro EOCD en los últimos 65.557 bytes sin leer el archivo entero.
+3. Detecta y rechaza de forma controlada formatos ZIP64 y multidisco.
+4. Inspecciona el Directorio Central en un búfer acotado (≤ 16 MB), identificando únicamente las entradas relacionales (`followers_*.json`, `following.json`).
+5. Extrae selectivamente mediante `File.slice()` los encabezados locales y rangos de datos de las entradas seleccionadas; **los archivos multimedia y mensajes nunca se solicitan ni se leen de almacenamiento**.
+6. Descomprime mediante passthrough (STORE) o streaming DEFLATE acotado con límite de seguridad (≤ 30 MB por entrada y acumulado), verificando CRC32 e integridad.
+7. Deserializa mediante `JSON.parse` y valida la secuencia de partes antes de entregar los datos a React.
 
-*Limitación conocida:* Este enfoque descarta exportaciones legítimas que pesen más de 200 MB (incluso cuando el contenido relevante sea menor a 1 MB) y duplica el consumo de memoria al cargar el archivo ZIP entero en el heap.
-
-### Arquitectura Objetivo (Fases 2–4, ADR-0004)
+### Arquitectura Modular (Fases 2–4, ADR-0004)
 
 La evolución arquitectónica separa el pipeline de importación en cuatro capas desacopladas:
 

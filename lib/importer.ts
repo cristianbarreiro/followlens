@@ -1,16 +1,11 @@
-import { unzip, strFromU8 } from 'fflate';
+import { strFromU8 } from 'fflate';
 import { fileKind, parseRelationships } from './relationships.ts';
+import { readZipSelective, MAX_JSON_TOTAL } from './zip.ts';
 
-const MAX_ARCHIVE = 200 * 1024 * 1024,
-  MAX_JSON = 30 * 1024 * 1024;
 export async function importFiles(
   files: File[],
 ): Promise<{ followers: string[]; following: string[]; fileCount: number }> {
   if (!files.length) throw new Error('Elegí el ZIP o los archivos JSON.');
-  if (files.reduce((sum, f) => sum + f.size, 0) > MAX_ARCHIVE)
-    throw new Error(
-      'Los archivos superan los 200 MB. Exportá solo seguidores y seguidos.',
-    );
   const zipped = files.filter((f) => f.name.toLowerCase().endsWith('.zip'));
   if (zipped.length && files.length > 1)
     throw new Error(
@@ -18,43 +13,9 @@ export async function importFiles(
     );
   const entries: Record<string, Uint8Array> = {};
   if (zipped.length) {
-    const bytes = new Uint8Array(await zipped[0].arrayBuffer());
-    const extracted = await new Promise<Record<string, Uint8Array>>(
-      (resolve, reject) => {
-        let size = 0,
-          count = 0,
-          tooLarge = false;
-        unzip(
-          bytes,
-          {
-            filter: (file) => {
-              if (!fileKind(file.name)) return false;
-              size += file.originalSize;
-              count++;
-              if (size > MAX_JSON || count > 1000) {
-                tooLarge = true;
-                return false;
-              }
-              return true;
-            },
-          },
-          (error, result) => {
-            if (tooLarge)
-              reject(
-                new Error(
-                  'Los JSON superan el límite de 30 MB o 1.000 archivos.',
-                ),
-              );
-            else if (error)
-              reject(
-                new Error(
-                  'No se pudo abrir el ZIP. Puede estar dañado o protegido.',
-                ),
-              );
-            else resolve(result);
-          },
-        );
-      },
+    const extracted = await readZipSelective(
+      zipped[0],
+      (path) => fileKind(path) !== null,
     );
     Object.assign(entries, extracted);
   } else {
@@ -62,7 +23,7 @@ export async function importFiles(
     for (const file of files) {
       if (!fileKind(file.name)) continue;
       total += file.size;
-      if (total > MAX_JSON)
+      if (total > MAX_JSON_TOTAL)
         throw new Error('Los JSON superan el límite de 30 MB.');
       if (entries[file.name])
         throw new Error('Hay archivos repetidos. Elegí una única exportación.');

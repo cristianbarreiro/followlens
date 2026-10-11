@@ -130,7 +130,7 @@ export function ImportDialog({
             <p>
               {files.length
                 ? files.map((f) => f.name).join(', ')
-                : 'ZIP hasta 200 MB · JSON hasta 30 MB'}
+                : 'Exportación ZIP completa (analizamos seguidores y seguidos) · JSON individuales hasta 30 MB'}
             </p>
             <button
               type="button"

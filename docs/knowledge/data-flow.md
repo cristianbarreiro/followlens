@@ -19,23 +19,28 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
 
 ---
 
-## 1. Flujo Actual (Implementación en `lib/importer.ts`)
+## 1. Flujo Implementado (`lib/zip.ts` y `lib/importer.ts`)
 
 ```
 [Usuario selecciona ZIP o JSONs]
                 │
                 ▼
-1. Pre-validación monolítica
+1. Pre-validación
    - ¿Array vacío? → Error
-   - ¿Tamaño total > 200 MB? → Error (límite rígido actual)
    - ¿Más de un archivo ZIP? → Error
+   - (Sin límite arbitrario de 200 MB para el archivo ZIP)
                 │
                 ▼
-2. Extracción / Lectura en Memoria
-   - CASO ZIP: Lectura completa mediante File.arrayBuffer()
-     * fflate.unzip(bytes, { filter }) filtra por nombre de archivo
-     * Límite: ≤ 30 MB descompreso / ≤ 1.000 archivos
-     * Se acumulan todas las entradas en Record<string, Uint8Array>
+2. Extracción Selectiva / Lectura por Rangos
+   - CASO ZIP: Lectura selectiva por rangos (File.slice) vía `readZipSelective`
+     * Búsqueda de EOCD en los últimos 65.557 bytes
+     * Detección y rechazo controlado de ZIP64 y multidisco
+     * Lectura e inspección del Directorio Central (presupuesto ≤ 16 MB)
+     * Filtrado de entradas relacionales vía fileKind() (máx. 1.000 entradas)
+     * Descarte completo de medios (fotos, vídeos, reels) y DMs sin leer sus bytes
+     * Validación de cabeceras locales (LFH), offsets y descriptor de datos (bit 3)
+     * Descompresión STORE / streaming DEFLATE acotada (≤ 30 MB por entrada y total)
+     * Verificación estricta de CRC32 (IEEE 802.3) y longitud real descomprimida
    - CASO JSON: Lectura secuencial en memoria con límite acumulado de 30 MB
                 │
                 ▼
@@ -115,8 +120,8 @@ El nuevo flujo resuelve el cuello de botella de memoria y el límite artificial 
    - Opción de persistencia voluntaria en IndexedDB.
 ```
 
-> [!IMPORTANT]
-> El flujo objetivo describe la meta de desarrollo para las Fases 2, 3 y 4. No debe asumirse como implementado hasta que el código de `lib/importer.ts` sea modificado y probado formalmente.
+> [!NOTE]
+> La arquitectura de extracción selectiva por rangos e inspección de directorio central está implementada en `lib/zip.ts` y conectada en `lib/importer.ts` (Fase 3). La validación y medición formal de rendimiento en navegadores reales con exportaciones completas (~232 MB) se completará en la Fase 4.
 
 ---
 

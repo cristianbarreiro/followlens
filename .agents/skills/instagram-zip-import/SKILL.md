@@ -19,15 +19,15 @@ Antes de proponer o aplicar cambios al importador:
 
 ---
 
-## 2. Diagnóstico: Estado Actual vs. Estado Objetivo
+## 2. Diagnóstico: Estado Anterior vs. Estado Implementado
 
-| Dimensión | Estado Actual en Código | Estado Objetivo (Fases 2–4) |
+| Dimensión | Estado Anterior (Fases 1–2) | Estado Implementado (Fase 3 / ADR-0004) |
 |---|---|---|
-| **Lectura ZIP** | `new Uint8Array(await file.arrayBuffer())` carga todo el archivo en memoria. | Lectura incremental por bloques (streams / slices). |
-| **Límite de Archivo** | Límite rígido de 200 MB (`MAX_ARCHIVE`). | No rechazar ZIP legítimo por peso total; procesar incrementalmente. |
-| **Descompresión** | `fflate.unzip` con filtro, pero acumulando en `Record<string, Uint8Array>`. | Extracción progresiva y selectiva de las entradas necesarias. |
-| **Filtro de Contenido** | Ignora archivos no coincidentes con `fileKind()`. | Mantener descarte estricto de multimedia (fotos/vídeos) y DMs. |
-| **Validación de Partes** | Exige secuencia estricta (`followers_1.json`, `followers_2.json` sin saltos). | **Invariante:** Preservar intacta la detección de partes faltantes. |
+| **Lectura ZIP** | `new Uint8Array(await file.arrayBuffer())` cargaba todo el archivo. | Lectura selectiva por rangos vía `File.slice()` (`lib/zip.ts`). |
+| **Límite de Archivo** | Límite rígido de 200 MB (`MAX_ARCHIVE`). | Sin límite arbitrario de peso total; admite exportaciones oficiales completas. |
+| **Descompresión** | `fflate.unzip` monolítico en memoria. | Extracción selectiva LFH/data y streaming DEFLATE acotado (≤ 30 MB). |
+| **Filtro de Contenido** | Ignoraba archivos no coincidentes con `fileKind()`. | Inspección de Directorio Central; cero I/O o descompresión de multimedia y DMs. |
+| **Validación de Partes** | Exige secuencia estricta (`followers_1.json`, `followers_2.json` sin saltos). | **Invariante:** Preservada intacta la detección de partes faltantes. |
 
 ---
 

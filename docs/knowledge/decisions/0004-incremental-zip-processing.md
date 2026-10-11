@@ -11,14 +11,14 @@ tags:
   - slice
   - importer
   - memory
-timestamp: "2026-10-11T11:45:00-03:00"
-lifecycle: pending
+timestamp: "2026-10-11T12:35:00-03:00"
+lifecycle: active
 ---
 
 # ADR-0004: Procesamiento Progresivo e Incremental de Exportaciones ZIP
 
 ## Estado
-**Especificación Técnica Cerrada — Pendiente de Implementación en Fase 3 y Medición en Fase 4**
+**Implementado (Fase 3) — Pendiente de Medición Formal en Navegador en Fase 4**
 
 ---
 
@@ -70,11 +70,11 @@ Durante la auditoría técnica de la Fase 2 se evaluaron las siguientes vías de
    - *Mecanismo:*
      1. `File.slice(start, end)` no lee el disco inmediatamente; proporciona descriptores de rango que realizan lecturas posicionales (*seek*) al invocar `.arrayBuffer()`.
      2. Se lee únicamente la ventana final para localizar el End of Central Directory (EOCD).
-     3. Se lee y cataloga el bloque del Directorio Central (CD).
-     4. Se identifican las entradas que coinciden con `followers_*.json` y `following.json`.
-     5. Para cada entrada coincidente, se lee su rango comprimido exacto y se descomprime de forma aislada utilizando `fflate.inflate()` o passthrough (STORE).
-     6. Los cientos de megabytes de multimedia (fotos, vídeos, mensajes) **nunca se leen del disco ni se asignan en el heap**.
-   - *Conclusión:* **Estrategia seleccionada y aprobada para Fase 3**.
+     3. Se lee e inspecciona el bloque completo del Directorio Central (CD) para catalogar los metadatos de todas las entradas sin leer su contenido.
+     4. Se identifican exclusivamente las entradas relacionales que coinciden con `followers_*.json` y `following.json`.
+     5. Para cada entrada coincidente, se lee su rango local exacto y se descomprime de forma aislada (STORE o streaming DEFLATE acotado).
+     6. Los bytes de contenido de los archivos multimedia (fotos, vídeos, reels, historias) y mensajes privados **nunca se solicitan mediante rangos de `File.slice()`, no se leen del disco ni se descomprimen en el heap**.
+   - *Conclusión:* **Estrategia implementada y validada en Fase 3**.
 
 4. **Parser JSON incremental vs. `JSON.parse`:**
    - Las exportaciones de Instagram dividen los seguidores en archivos secuenciales (`followers_1.json`, `followers_2.json`, etc.) de típicamente 10.000 usuarios cada uno (~1 a 2 MB por archivo).
@@ -156,5 +156,5 @@ La suite en `lib/relationships.test.ts` deberá incorporar pruebas unitarias sin
 
 ## 6. Consecuencias y Próximos Pasos
 
-- **Aprobación técnica:** Queda definida una arquitectura viable, robusta y compatible con la versión actual de `fflate` (0.8.3) y las APIs estándar del navegador.
-- **Transición a Fase 3:** Una vez revisada y aprobada esta especificación, la Fase 3 implementará el lector en `lib/importer.ts`, añadirá las pruebas sintéticas en `lib/relationships.test.ts` y actualizará la UI en `components/import-dialog.tsx`.
+- **Implementación completada (Fase 3):** La arquitectura selectiva está completamente implementada en `lib/zip.ts` y conectada en `lib/importer.ts`, acompañada de 23 suites de pruebas unitarias que validan la lectura selectiva, rechazo de ZIP64/multidisco, omisión de lectura de multimedia y compatibilidad con ZIP > 200 MB sin asignación masiva de memoria.
+- **Medición de rendimiento reservada para Fase 4:** Las mediciones formales de tiempos de ejecución y perfiles de memoria heap en navegadores reales (Chrome / Firefox) con el archivo de exportación de referencia de ~232 MB se llevarán a cabo en la Fase 4. No se presentan mediciones sintéticas como sustituto de dichas pruebas de navegador.
