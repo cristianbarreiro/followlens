@@ -13,7 +13,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
    - Data Ingestion & Transformation: [docs/knowledge/data-flow.md](docs/knowledge/data-flow.md)
    - Domain Model & Types: [docs/knowledge/domain-model.md](docs/knowledge/domain-model.md)
    - Testing & Development: [docs/knowledge/development.md](docs/knowledge/development.md)
-   - Target Incremental Processing (ADR-0004): [docs/knowledge/decisions/0004-incremental-zip-processing.md](docs/knowledge/decisions/0004-incremental-zip-processing.md)
+   - Selective ZIP Processing (ADR-0004): [docs/knowledge/decisions/0004-incremental-zip-processing.md](docs/knowledge/decisions/0004-incremental-zip-processing.md)
 3. **Specialized Skills (.agents/skills/):**
    - ZIP Import & Memory Strategy: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
    - Verification Standards: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
@@ -35,7 +35,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
 
 - **Client-Side Isolation:** 100% in-browser processing. Never introduce remote APIs, functions, or servers for personal data.
 - **Zero Telemetry:** Do not transmit Instagram usernames or exported data over any network connection.
-- **Selective Extraction & Scope Boundary:** Current functional scope targets followers and following relationships (`followers_*.json`, `followers_*.html`, `following.json`, `following.html`). Never extract or buffer photos, videos, stories, or DMs. Legitimate ZIP size (>200 MB) is not a rejection reason in target architecture; distinguish current in-memory buffering limit (200 MB) from target incremental design.
+- **Selective Extraction & Scope Boundary:** Current functional scope targets followers and following relationships (`followers_*.json`, `followers_*.html`, `following.json`, `following.html`). ZIP imports inspect the central directory and use `File.slice()` to read relevant ranges only; unrelated media and DMs are not extracted. There is no fixed total archive-size rejection, but relevant compressed/decompressed data and standalone files have 30 MiB limits. DEFLATE decompression is chunked; parsing remains per file, not fully streaming.
 - **Optional Local Persistence:** IndexedDB (`followlens-local`) only with explicit user opt-in.
 - **Account Isolation:** Snapshots from different accounts (`account`) must never be mixed or compared.
 - **PolyForm Noncommercial 1.0.0:** Source-available model for personal, educational, and research use. Commercial use requires explicit permission.

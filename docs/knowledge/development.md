@@ -42,7 +42,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 
 ## 3. Pruebas Unitarias Actuales (`lib/relationships.test.ts`)
 
-La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
+La suite unitaria se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
 
 ### Cobertura Actual Comprobada (34 tests unitarios activos):
 
@@ -95,7 +95,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Playwright inicia automáticamente el servidor local de Vinext en `localhost:4173`. Los artefactos de prueba se escriben en `test-results/` (ignorado por Git), con capturas, video y trazas desactivados. El repositorio no contiene actualmente workflows de CI; por eso la suite se documenta como comando reproducible sin agregar un workflow nuevo.
+Playwright inicia automáticamente el servidor local de Vinext en `localhost:4173`. Los artefactos de prueba se escriben en `test-results/` (ignorado por Git), con capturas, video y trazas desactivados. El workflow `.github/workflows/e2e.yml` ejecuta la suite junto con las verificaciones unitarias, de tipos y de build en Node.js 24.
 
 ---
 

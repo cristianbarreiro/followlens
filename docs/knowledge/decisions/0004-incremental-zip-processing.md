@@ -87,7 +87,7 @@ Durante la auditoría técnica de la Fase 2 se evaluaron las siguientes vías de
 
 ## 4. Especificación Técnica del Lector ZIP Selectivo (Fase 3)
 
-La implementación en `lib/importer.ts` deberá cumplir con los siguientes criterios rigurosos:
+La implementación actual de `lib/zip.ts` y `lib/importer.ts` cumple con los siguientes criterios:
 
 ### 4.1. Búsqueda y Validación del EOCD
 
@@ -115,15 +115,15 @@ La implementación en `lib/importer.ts` deberá cumplir con los siguientes crite
 ### 4.4. Métodos de Compresión y Cifrado
 
 - **Método 0 (STORE):** Datos sin comprimir; se extraen directamente como `Uint8Array`.
-- **Método 8 (DEFLATE):** Se descomprimen mediante `fflate.inflate()` o `fflate.inflateSync()`.
+- **Método 8 (DEFLATE):** Se descomprime con `decompressDeflate()` en `lib/zip.ts`, que utiliza `fflate.Inflate` y controla el tamaño de salida en cada fragmento.
 - **Entradas Cifradas:** Si el bit 0 de las banderas de propósito general está activo (`flag & 0x0001`), abortar con error: _"El archivo ZIP contiene entradas protegidas por contraseña no soportadas."_
 - **Métodos desconocidos:** Si `method !== 0 && method !== 8`, abortar con error: _"Método de compresión no soportado (${method})."_
 
 ### 4.5. Verificación de Integridad (CRC32)
 
-- `fflate.inflate()` valida internamente la integridad del stream DEFLATE y lanza errores si los bloques están corruptos.
-- La validación sintáctica de `JSON.parse()` garantiza que el contenido descomprimido no contenga datos truncados.
-- Si se detectan bytes corruptos o el decompressor falla, se captura el error y se emite un mensaje amigable al usuario.
+- `fflate.Inflate` informa fallos de descompresión; `decompressDeflate()` los convierte en errores controlados, preservando el error de límite de salida.
+- `lib/zip.ts` verifica longitud descomprimida y CRC32 tras extraer cada entrada, y `lib/importer.ts` valida el formato JSON o HTML antes de aceptar la importación.
+- Si se detectan bytes corruptos o falla la descompresión, se emite un mensaje controlado al usuario.
 
 ### 4.6. Detección y Rechazo Seguro de ZIP64
 

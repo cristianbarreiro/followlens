@@ -35,7 +35,7 @@ function monitorBrowser(page: Page): BrowserSignals {
   page.on('pageerror', () => {
     signals.pageErrors += 1;
   });
-  page.on('request', (request) => {
+  page.context().on('request', (request) => {
     const url = new URL(request.url());
     if (!isAppTraffic(url)) signals.externalOrigins.push(url.origin);
   });
@@ -159,6 +159,7 @@ async function assertDashboardResults(
   await expect(summary.getByRole('button').nth(2).locator('strong')).toHaveText(
     String(expected.mutuals.length),
   );
+  await expect(list.getByRole('row')).toHaveCount(expected.notBack.length + 1);
   for (const name of expected.notBack)
     await expect(list.getByText(`@${name}`, { exact: true })).toBeVisible();
   const groups = [
@@ -168,6 +169,7 @@ async function assertDashboardResults(
   ];
   for (const group of groups) {
     await summary.getByRole('button').nth(group.index).click();
+    await expect(list.getByRole('row')).toHaveCount(group.names.length + 1);
     for (const name of group.names)
       await expect(list.getByText(`@${name}`, { exact: true })).toBeVisible();
   }
