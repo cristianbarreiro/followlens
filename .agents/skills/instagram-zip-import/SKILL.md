@@ -57,5 +57,5 @@ Antes de proponer o aplicar cambios al importador:
    Rechazar importaciones que contengan múltiples directorios de cuentas en colisión o más de un archivo ZIP simultáneo.
 7. **Prohibición de Datos Reales en Fixtures:**
    **Nunca** utilizar exportaciones reales ni datos personales de usuarios para fixtures de prueba, logs ni commits. Utilizar exclusivamente generadores sintéticos en memoria (`fflate.zipSync`).
-8. **Validación con Exportación Real:**
-   En la Fase 5 quedó empíricamente validada la importación completa con un archivo físico de ~232 MB (243 MB) en formato HTML, completando el análisis de 84 seguidores y 276 seguidos en 224 ms con solo 282 KB leídos del disco y 2 MB de memoria heap.
+8. **Validación con Exportación Real y Hardening:**
+   En la Fase 5 quedó empíricamente validada la importación completa con un archivo físico de ~232 MB (243 MB) en formato HTML, completando el análisis de 84 seguidores y 276 seguidos en 224 ms con solo 282 KB leídos del disco y 2 MB de memoria heap. En la Fase 6 se completó el hardening del parser HTML (filtrado estricto de rutas de contenido `/p/`, `/reel/`, `/explore/`, descarte de documentos ajenos con `<main>` y validación de hostnames), la auditoría de la interfaz en navegador y la ampliación de la suite a 34 tests unitarios nativos.

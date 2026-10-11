@@ -10,7 +10,10 @@ import {
   csvRows,
   type Snapshot,
 } from './relationships.ts';
-import { parseHtmlRelationships } from './html-parser.ts';
+import {
+  parseHtmlRelationships,
+  extractUsernameFromUrl,
+} from './html-parser.ts';
 import { importFiles } from './importer.ts';
 import { crc32, decompressDeflate } from './zip.ts';
 
@@ -1092,4 +1095,170 @@ test('admite lista HTML de seguidores legitimamente vacia', async () => {
   ]);
   assert.deepEqual(res.followers, []);
   assert.deepEqual(res.following, ['alguien']);
+});
+
+test('validacion rigurosa de URL y username en HTML (rutas de contenido, hostnames y slugs)', () => {
+  // URLs de perfiles válidas
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/usuario_valido'),
+    'usuario_valido',
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://instagram.com/usuario_valido/'),
+    'usuario_valido',
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/_u/usuario_slug'),
+    'usuario_slug',
+  );
+  assert.equal(
+    extractUsernameFromUrl('/_u/usuario_relativo_slug'),
+    'usuario_relativo_slug',
+  );
+  assert.equal(
+    extractUsernameFromUrl('/usuario_relativo'),
+    'usuario_relativo',
+  );
+  assert.equal(
+    extractUsernameFromUrl(
+      'https://www.instagram.com/usuario_valido?utm_source=ig',
+    ),
+    'usuario_valido',
+  );
+
+  // Rutas de contenido de Instagram: NUNCA deben interpretarse como usuarios
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/p/DFxyz123/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/reel/C-abc12/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/reels/videos/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/stories/alguien/12345/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/tv/C-tv123/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl(
+      'https://www.instagram.com/explore/tags/naturaleza/',
+    ),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/explore/'),
+    null,
+  );
+
+  // Enlaces institucionales, legales y de navegación
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/about/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/legal/terms/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/privacy/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/help/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/accounts/login/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/developer/'),
+    null,
+  );
+
+  // Hostnames ajenos o ataques de suplantación
+  assert.equal(
+    extractUsernameFromUrl('https://evil.com/usuario_valido'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl(
+      'https://www.instagram.com.attacker.com/usuario_valido',
+    ),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://instagram.com.fake.org/usuario_valido'),
+    null,
+  );
+
+  // Protocolos inseguros y formatos malformados
+  assert.equal(
+    extractUsernameFromUrl('javascript:alert(1)'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('mailto:user@instagram.com'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/_u/'),
+    null,
+  );
+  assert.equal(
+    extractUsernameFromUrl('https://www.instagram.com/_u/user/extra/path'),
+    null,
+  );
+  assert.equal(extractUsernameFromUrl(''), null);
+  assert.equal(extractUsernameFromUrl('   '), null);
+});
+
+test('rechazo de documentos ajenos con main y reconocimiento estricto de estructura relacional', () => {
+  // Documento ajeno que contiene <main> pero sin marcadores de exportación
+  const foreignWithMain = `<!DOCTYPE html><html><head><title>Mi Blog Personal</title></head><body><main><p>Artículo sobre viajes</p></main></body></html>`;
+  assert.throws(
+    () => parseHtmlRelationships(foreignWithMain, 'followers'),
+    /no tiene una estructura compatible/i,
+  );
+
+  // Documento con <main> vacío pero sin título ni estilos de Instagram
+  const emptyMainForeign = `<!DOCTYPE html><html><body><main></main></body></html>`;
+  assert.throws(
+    () => parseHtmlRelationships(emptyMainForeign, 'followers'),
+    /no tiene una estructura compatible/i,
+  );
+
+  // Documento con título de seguidores pero que contiene exclusivamente enlaces externos
+  const fakeFollowersExternal = `<!DOCTYPE html><html><head><title>Seguidores</title></head><body><main><a href="https://externo.com/perfil">Link</a></main></body></html>`;
+  assert.throws(
+    () => parseHtmlRelationships(fakeFollowersExternal, 'followers'),
+    /no tiene una estructura compatible/i,
+  );
+
+  // Documento con título de seguidores pero que contiene exclusivamente enlaces de contenido (/p/)
+  const fakeFollowersPosts = `<!DOCTYPE html><html><head><title>Seguidores</title></head><body><main><a href="https://www.instagram.com/p/DFxyz123/">Post</a></main></body></html>`;
+  assert.throws(
+    () => parseHtmlRelationships(fakeFollowersPosts, 'followers'),
+    /no tiene una estructura compatible/i,
+  );
+});
+
+test('rechazo de documentos HTML con registros donde no se puede extraer ningun usuario', () => {
+  // Documento con bloques uiBoxWhite pero sin enlaces ni encabezados válidos
+  const brokenRecordsHtml = `<!DOCTYPE html><html><head><title>Seguidores</title></head><body><main>
+    <div class="pam uiBoxWhite"><div class="_a6-p"><p>Registro roto sin enlace</p></div></div>
+  </main></body></html>`;
+
+  assert.throws(
+    () => parseHtmlRelationships(brokenRecordsHtml, 'followers'),
+    /no tiene una estructura compatible|no se pudieron extraer nombres de usuario/i,
+  );
 });

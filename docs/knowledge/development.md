@@ -31,7 +31,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | ------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
 | `npm run dev`       | Inicia el servidor de desarrollo local con HMR.           | `vinext dev`                                      | Entorno Vite 8 con Vinext.                  |
 | `npm run build`     | Compila la aplicación completa para producción.           | `vinext build`                                    | Compila bundles cliente y SSR.              |
-| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 14 tests unitarios nativos.                 |
+| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 34 tests unitarios nativos (0 suites).      |
 | `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.     |
 | `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.    |
 | `npm run lint`      | Ejecuta el análisis estático de código.                   | `oxlint`                                          | Véase Sección 4 para diagnóstico de linter. |
@@ -43,7 +43,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 
 La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
 
-### Cobertura Actual Comprobada (31 tests activos):
+### Cobertura Actual Comprobada (34 tests unitarios activos):
 
 1. Normalización de usernames (descarte de fórmulas de planilla `@`, `=`, `<script>`).
 2. Parsing de formatos planos, envueltos y resolución por `title` / URL.
@@ -76,9 +76,12 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 29. Rechazo controlado de importación con formatos mezclados JSON y HTML.
 30. Admisión de archivos HTML sueltos sin archivo ZIP.
 31. Admisión de lista HTML de seguidores legítimamente vacía.
+32. Validación rigurosa de URL y username en HTML (rutas de contenido `/p/`, `/reel/`, `/stories/`, `/explore/`, hostnames institucionales y slugs `/_u/`).
+33. Rechazo de documentos HTML ajenos que contengan `<main>` sin estructura ni encabezados de exportación de Instagram.
+34. Rechazo de documentos HTML con bloques de registro pero sin nombres de usuario extraíbles.
 
 > [!NOTE]
-> **Datos de prueba y validación:** Las 31 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la Fase 5 se validó de extremo a extremo la importación con la exportación real de Instagram de ~232 MB (243 MB, 819 entradas) conteniendo `followers_1.html` y `following.html`, procesando el análisis completo en 224 ms con solo 282 KB leídos del disco y 2 MB de memoria heap.
+> **Datos de prueba y validación:** Las 34 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la salida de `node:test`, se reportan 34 tests pasados y 0 suites (archivo único de ejecución). Las mediciones con la exportación real de Instagram de ~232 MB (243 MB, 819 entradas) corresponden a mediciones en Node 24 / V8 en el entorno de desarrollo y auditorías visuales del navegador local, manteniéndose diferenciadas de las aserciones de la suite de pruebas automatizadas.
 
 ---
 

@@ -58,19 +58,19 @@ lib/
 
 ## 4. HOW — Flujo Actual vs. Arquitectura Objetivo
 
-### Estado de la Implementación (`lib/zip.ts` y `lib/importer.ts`)
+### Estado de la Implementación (`lib/zip.ts`, `lib/importer.ts` y `lib/html-parser.ts`)
 
-En la Fase 3, el pipeline de importación fue desacoplado mediante lectura selectiva por rangos:
+El pipeline de importación opera mediante lectura selectiva por rangos y soporte dual JSON/HTML:
 
 1. Recibe los archivos seleccionados por el usuario (`File[]`), admitiendo exportaciones completas sin rechazo por tamaño de archivo.
 2. Para archivos ZIP, localiza el registro EOCD en los últimos 65.557 bytes sin leer el archivo entero.
 3. Detecta y rechaza de forma controlada formatos ZIP64 y multidisco.
-4. Inspecciona el Directorio Central en un búfer acotado (≤ 16 MB), identificando únicamente las entradas relacionales (`followers_*.json`, `following.json`).
+4. Inspecciona el Directorio Central en un búfer acotado (≤ 16 MB), identificando únicamente las entradas relacionales (`followers_*.json`, `following.json`, `followers_*.html`, `following.html`).
 5. Extrae selectivamente mediante `File.slice()` los encabezados locales y rangos de datos de las entradas seleccionadas; **los archivos multimedia y mensajes nunca se solicitan ni se leen de almacenamiento**.
 6. Descomprime mediante passthrough (STORE) o streaming DEFLATE acotado con límite de seguridad (≤ 30 MB por entrada y acumulado), verificando CRC32 e integridad.
-7. Deserializa mediante `JSON.parse` y valida la secuencia de partes antes de entregar los datos a React.
+7. Deserializa mediante `JSON.parse` (para exportaciones JSON) o `parseHtmlRelationships` (parser pasivo seguro con DOMParser para HTML), asegurando consistencia de formato (sin mezclas híbridas ambiguas) y validando la secuencia de partes antes de entregar los datos a React.
 
-### Arquitectura Modular (Fases 2–4, ADR-0004)
+### Arquitectura Modular (ADR-0004)
 
 La evolución arquitectónica separa el pipeline de importación en cuatro capas desacopladas:
 
@@ -84,7 +84,7 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 ┌────────────────────────────────────────────────────────────────────────┐
 │                     2. INSPECCIÓN DE ENTRADAS                          │
 │  Lectura del directorio central / catálogo de entradas del ZIP          │
-│  Identificación de followers_*.json y following.json sin descomprimir   │
+│  Identificación de followers y following (JSON / HTML) sin descomprimir │
 │  Descarte total de fotografías, vídeos, audios y mensajes privados     │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
@@ -92,16 +92,17 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 ┌────────────────────────────────────────────────────────────────────────┐
 │               3. EXTRACCIÓN PROGRESIVA Y CONTROLADA                    │
 │  Descompresión por chunks de las entradas seleccionadas                 │
-│  Límites dinámicos de descompresión por archivo JSON relevante          │
+│  Límites dinámicos de descompresión por archivo relevante (≤ 30 MB)     │
 │  Gestión de memoria acotada y reporte de progreso verificable          │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │               4. ANALIZADORES MODULARES INDEPENDIENTES                 │
-│  [Analizador 1 (Inicial): Seguidores y Seguidos (relationships.ts)]   │
-│  - Limpieza BOM UTF-8 y deserialización segura                          │
-│  - Normalización de usernames (normalize)                               │
+│  [Analizador 1: Seguidores y Seguidos (JSON + HTML)]                   │
+│  - Limpieza BOM UTF-8 y deserialización JSON segura                     │
+│  - Parser pasivo DOMParser con decodificación de entidades para HTML    │
+│  - Normalización de usernames (normalize) y filtrado de rutas no-perfil │
 │  - Verificación de partes secuenciales sin saltos                       │
 │  - Cálculo de conjuntos (mutuals, notBack, fans, snapshots)             │
 │  [Futuros Analizadores: Diseñados como módulos independientes]        │
@@ -109,7 +110,7 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 ```
 
 > [!NOTE]
-> Esta separación en capas y procesamiento incremental es el **diseño objetivo**. La implementación real en código se realizará en la Fase 3, previa validación técnica en la Fase 2.
+> Esta arquitectura modular se encuentra completamente implementada en producción (Fases 3 a 6), admitiendo exportaciones oficiales completas en formatos JSON y HTML mediante lectura selectiva por rangos y descompresión acotada.
 
 ---
 
@@ -118,7 +119,7 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 1. **PROHIBIDO añadir transmisión de datos:** No deben introducirse llamadas `fetch`, `axios`, WebSockets o analítica hacia servidores externos que envíen datos de seguidores, identificadores o metadatos de usuario.
 2. **Frontera de Privacidad y Procesamiento en Cliente:** Todo el procesamiento ocurre en el navegador del usuario. Cero backends o microservicios para procesar datos personales.
 3. **Exclusión estricta de archivos no relacionados:** El sistema nunca debe descomprimir ni acumular fotos, vídeos, audios, historias o conversaciones de chat contenidas en el archivo ZIP.
-4. **Criterio de Tamaño de Archivo:** En la arquitectura objetivo (ADR-0004), el tamaño total comprimido de un ZIP legítimo (>200 MB) no es causal de rechazo. Se aplican salvaguardas proporcionales por archivo descompreso y límites de consumo de recursos.
+4. **Criterio de Tamaño de Archivo:** En la arquitectura implementada (ADR-0004), el tamaño total comprimido de un ZIP legítimo (>200 MB) no es causal de rechazo. Se aplican salvaguardas proporcionales por archivo descompreso (≤ 30 MB) y límites de consumo de recursos.
 5. **Validación de Partes Obligatoria:** Si un usuario tiene múltiples archivos de seguidores (`followers_1.json`, `followers_3.json`), la importación debe fallar de inmediato si falta alguna parte intermedia para evitar corromper el análisis de seguidores perdidos.
 6. **Aislamiento Multicuenta:** Nunca comparar ni mezclar snapshots pertenecientes a cuentas distintas (`account`).
 
@@ -128,6 +129,6 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 
 Cualquier cambio estructural debe validarse mediante:
 
-- `npm test`: Ejecución de los 14 tests unitarios de `lib/relationships.test.ts`.
+- `npm test`: Ejecución de los 34 tests unitarios de `lib/relationships.test.ts` (0 suites).
 - `npm run typecheck`: Validación estricta de TypeScript (`tsc --noEmit`).
 - `npm run build`: Empaquetado completo de producción con Vite y Vinext (`vinext build`).

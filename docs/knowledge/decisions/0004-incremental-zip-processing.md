@@ -19,20 +19,20 @@ lifecycle: active
 
 ## Estado
 
-**Implementado y Validado con exportaciones JSON y HTML (Fases 4 y 5)**
+**Implementado, Endurecido y Validado con exportaciones JSON y HTML (Fases 4 a 6)**
 
 ---
 
-## 1. Contexto
+## 1. Contexto Histórico y Problema Original
 
-FollowLens procesa exportaciones oficiales descargadas por los usuarios desde Instagram. Actualmente, `lib/importer.ts` impone dos restricciones rígidas de tamaño:
+FollowLens procesa exportaciones oficiales descargadas por los usuarios desde Instagram. En las versiones iniciales (Fases 1 y 2), `lib/importer.ts` imponía dos restricciones rígidas de tamaño:
 
-1. `MAX_ARCHIVE = 200 * 1024 * 1024` (200 MB): Rechaza de plano cualquier lote de archivos cuyo tamaño acumulado supere 200 MB comprimidos.
+1. `MAX_ARCHIVE = 200 * 1024 * 1024` (200 MB): Rechazaba de plano cualquier lote de archivos cuyo tamaño acumulado superara 200 MB comprimidos.
 2. `MAX_JSON = 30 * 1024 * 1024` (30 MB): Límite sobre el contenido descompreso acumulado.
 
-Además, la implementación actual lee el archivo ZIP completo en un búfer contiguo en el heap mediante `new Uint8Array(await zipped[0].arrayBuffer())` y acumula todas las entradas extraídas en un diccionario en memoria (`Record<string, Uint8Array>`) antes de deserializarlas secuencialmente.
+Además, aquella implementación inicial leía el archivo ZIP completo en un búfer contiguo en el heap mediante `new Uint8Array(await zipped[0].arrayBuffer())` y acumulaba todas las entradas extraídas en un diccionario en memoria (`Record<string, Uint8Array>`) antes de deserializarlas secuencialmente.
 
-En la práctica, una exportación oficial completa de Instagram que incluye fotografías, vídeos, historias y audios de la cuenta supera con frecuencia los 200 MB (por ejemplo, una exportación real de referencia pesa **232 MB**). Sin embargo, dentro de ese archivo de 232 MB, los archivos relevantes para el análisis (`followers_*.json` y `following.json`) suelen ocupar apenas unos pocos cientos de kilobytes o unos pocos megabytes. Rechazar el archivo legítimo únicamente por su tamaño total comprimido degrada la experiencia de usuario y contradice el objetivo de procesar la exportación completa directamente descargada de la plataforma.
+En la práctica, una exportación oficial completa de Instagram que incluye fotografías, vídeos, historias y audios de la cuenta supera con frecuencia los 200 MB (por ejemplo, una exportación real de referencia pesa **232 MB** / 243 MB). Sin embargo, dentro de ese archivo, los archivos relevantes para el análisis (`followers_*.json`, `following.json`, o sus equivalentes en HTML) suelen ocupar apenas unos pocos cientos de kilobytes. Rechazar el archivo legítimo únicamente por su tamaño total comprimido degradaba la experiencia de usuario y contradecía el objetivo de procesar la exportación completa directamente descargada de la plataforma. La arquitectura implementada en las Fases 3 a 6 eliminó este bloqueo mediante lectura selectiva por rangos.
 
 ---
 
@@ -41,17 +41,17 @@ En la práctica, una exportación oficial completa de Instagram que incluye foto
 Para evitar ambigüedades técnicas y falsas garantías, se diferencian estrictamente cuatro dimensiones de tamaño:
 
 1. **Tamaño total del archivo ZIP (Total Archive Size):**
-   El tamaño del archivo en disco seleccionado por el usuario (e.g. 232 MB o superior). No debe usarse como criterio de rechazo para exportaciones legítimas.
+   El tamaño del archivo en disco seleccionado por el usuario (e.g. 232 MB o superior). En la arquitectura implementada no se utiliza como criterio de rechazo para exportaciones legítimas.
 2. **Bytes leídos desde almacenamiento (I/O Read Bytes):**
-   La cantidad real de bytes leídos del disco mediante `File.slice()`. En la arquitectura objetivo se limita a la ventana del EOCD (hasta 65.557 bytes), el bloque del Directorio Central (típicamente 50–200 KB) y exclusivamente los segmentos comprimidos de los archivos JSON requeridos.
+   La cantidad real de bytes leídos del disco mediante `File.slice()`. Se limita a la ventana del EOCD (hasta 65.557 bytes), el bloque del Directorio Central (típicamente 50–200 KB) y exclusivamente los segmentos comprimidos de los archivos relacionales requeridos.
 3. **Tamaño comprimido de cada entrada relevante (Compressed Entry Size):**
-   El tamaño de cada segmento comprimido de `followers_*.json` y `following.json` dentro del archivo ZIP (generalmente decenas o cientos de kilobytes).
-4. **Tamaño JSON descomprimido (Decompressed JSON Size):**
-   La memoria intermedia tras la descompresión DEFLATE o STORE de cada entrada individual. Este valor está sujeto a un tope de seguridad DoS de **30 MB por archivo JSON individual**.
+   El tamaño de cada segmento comprimido de `followers_*` y `following` dentro del archivo ZIP (generalmente decenas o cientos de kilobytes).
+4. **Tamaño de datos descomprimidos (Decompressed Entry Size):**
+   La memoria intermedia tras la descompresión DEFLATE o STORE de cada entrada individual. Este valor está sujeto a un tope de seguridad DoS de **30 MB por archivo individual y acumulado**.
 
 > [!IMPORTANT]
 > **Aclaración sobre métricas de rendimiento:**
-> Las estimaciones previas de consumo de memoria y tiempos de ejecución (e.g. memoria mínima en heap o tiempos sub-100 ms) se consideran **hipótesis de diseño deseables pendientes de medición formal en la Fase 4**. No se garantiza consumo de memoria estrictamente constante, ya que el heap de JavaScript asigna memoria proporcional a la cantidad de objetos y cadenas de texto generadas durante `JSON.parse` y la normalización de identificadores.
+> El consumo de memoria y tiempos de ejecución reales dependen del entorno de ejecución. El heap de JavaScript asigna memoria proporcional a la cantidad de objetos y cadenas de texto generadas durante `JSON.parse` o la construcción del árbol DOM de `DOMParser` y la normalización de identificadores. Las mediciones registradas en este documento diferencian explícitamente entre benchmarks en Node 24 / V8 y auditorías visuales en el navegador web local.
 
 ---
 
@@ -59,10 +59,10 @@ Para evitar ambigüedades técnicas y falsas garantías, se diferencian estricta
 
 Durante la auditoría técnica de la Fase 2 se evaluaron las siguientes vías de implementación:
 
-1. **Lectura integral mediante `File.arrayBuffer()` (Implementación actual):**
+1. **Lectura integral mediante `File.arrayBuffer()` (Implementación histórica de Fases 1–2):**
    - _Ventajas:_ Implementación simple y directa.
-   - _Limitaciones:_ Requiere cargar los 232 MB enteros en un búfer contiguo de memoria. Provoca fallos por falta de memoria (`RangeError: Array buffer allocation failed`) en dispositivos móviles y descarta exportaciones válidas por el límite fijo de 200 MB.
-   - _Conclusión:_ Inviable para exportaciones completas con multimedia.
+   - _Limitaciones:_ Requería cargar los 232 MB enteros en un búfer contiguo de memoria. Provocaba fallos por falta de memoria (`RangeError: Array buffer allocation failed`) en dispositivos móviles y descartaba exportaciones válidas por el límite fijo de 200 MB.
+   - _Conclusión:_ Inviable para exportaciones completas con multimedia. Reemplazada en Fase 3.
 
 2. **Lectura secuencial por bloques con `fflate.Unzip`:**
    - _Hallazgo crítico:_ La inspección del código fuente de `fflate.Unzip` reveló que acumula internamente en un arreglo de retención (`unzipper.k[0].push(toAdd)`) los fragmentos de todas las entradas donde no se haya invocado inmediatamente `file.start()`. En consecuencia, al procesar secuencialmente un ZIP de 232 MB que contiene 230 MB de vídeo/fotos, la memoria heap retiene todos los chunks de los archivos omitidos, anulando el beneficio del streaming.
@@ -179,14 +179,23 @@ _Nota:_ La validación con la exportación real del usuario (~232 MB) se reserva
   - **Omisión completa de contenido pesado:** El lector nunca solicitó rangos de bytes ni descomprimió fotos, vídeos ni audios (más de 240 MB de contenido no requerido).
   - **Diagnóstico de formato:** El archivo real suministrado correspondía a la variante en formato **HTML** oficial de Instagram (`followers_1.html` y `following.html`), motivando la implementación de la Fase 5.
 
-- **Soporte de Exportaciones HTML y Validación Final de Extremo a Extremo (Fase 5):**
+- **Soporte de Exportaciones HTML y Benchmarks de Extremo a Extremo (Fase 5):**
   - **Parser seguro implementado:** `lib/html-parser.ts` procesa de forma pasiva mediante `DOMParser` las listas HTML oficiales (`followers_*.html`, `following.html`), decodifica entidades y resuelve enlaces de perfiles con prefijo `/_u/` y encabezados `<h2>`.
   - **Compatibilidad dual sin mezclas:** Reconocimiento simultáneo de JSON y HTML con salvaguarda que impide mezclar formatos de distintas exportaciones en un mismo lote.
-  - **Suite de pruebas:** Ampliada a **31 pruebas unitarias** con 100% de éxito, cubriendo listas HTML, multipartes con saltos, enlaces externos ignorados, documentos malformados y formatos mezclados.
-  - **Validación completa con el archivo real de 243 MB (~232 MiB):**
+  - **Benchmarks en entorno Node 24 / motor V8 con el archivo real de 243 MB (~232 MiB):**
     - **Tiempo de ejecución total:** **224,91 ms** (inspección ZIP selectiva + extracción + parsing HTML de ambas listas + set math).
     - **I/O selectivo:** Únicamente **282,49 KB** leídos del disco mediante `File.slice()` (apenas 0,11% del tamaño del archivo).
     - **Consumo de memoria:** Delta de heap de **2,03 MB** en el motor V8.
     - **Relaciones extraídas:** **84 seguidores**, **276 seguidos**, **37 mutuales**, **239 no devuelven seguimiento (`notBack`)**, **47 fans**.
     - **Consistencia matemática:** 100% verificada (`mutuals + notBack === 276`, `mutuals + fans === 84`).
     - **Privacidad comprobada:** 0 bytes transmitidos a la red; procesamiento 100% en el dispositivo cliente.
+
+- **Hardening del Parser HTML y Auditoría de Interfaz (Fase 6):**
+  - **Filtro riguroso de URLs:** Exclusión de rutas de contenido (`/p/`, `/reel/`, `/reels/`, `/stories/`, `/tv/`, `/explore/`), enlaces institucionales/legales (`/about/`, `/legal/terms/`, `/privacy/`), enlaces ajenos y verificación estricta de hostnames (`www.instagram.com`, `instagram.com`).
+  - **Reconocimiento estructural:** Rechazo de documentos HTML ajenos que contengan `<main>` o enlaces no relacionales. Rechazo de documentos que contengan bloques de registro pero sin nombres de usuario extraíbles.
+  - **Suite de pruebas:** Ampliada a **34 tests unitarios** con 100% de éxito en `node:test` (0 suites).
+  - **Auditoría de la interfaz en navegador local:**
+    - Modal de importación accesible con soporte explícito para `.zip`, `.json` y `.html`.
+    - Validación y feedback inmediato ante envíos incompletos o sin confirmación.
+    - Diseño responsive validado en resoluciones móviles (375x667) y de escritorio (1280x800).
+    - Cero errores o excepciones no controladas en la consola del navegador.

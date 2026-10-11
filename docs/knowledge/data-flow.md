@@ -123,15 +123,15 @@ El nuevo flujo resuelve el cuello de botella de memoria y el límite artificial 
 ```
 
 > [!NOTE]
-> La arquitectura de extracción selectiva por rangos e inspección de directorio central está implementada en `lib/zip.ts` y conectada en `lib/importer.ts` (Fase 3). La validación y medición formal de rendimiento en navegadores reales con exportaciones completas (~232 MB) se completará en la Fase 4.
+> La arquitectura de extracción selectiva por rangos e inspección de directorio central está implementada en `lib/zip.ts` y conectada en `lib/importer.ts`, con soporte dual JSON/HTML y parser pasivo en `lib/html-parser.ts` plenamente validado.
 
 ---
 
 ## 3. Compatibilidad con Esquemas de Instagram
 
-Instagram ha variado la estructura de sus archivos JSON a lo largo de las versiones. FollowLens soporta de forma nativa:
+Instagram ha variado la estructura de sus archivos a lo largo de las versiones. FollowLens soporta de forma nativa:
 
-### Formato Plano (Array directo)
+### Formato Plano JSON (Array directo)
 
 Común en `followers_*.json`:
 
@@ -150,7 +150,7 @@ Común en `followers_*.json`:
 ]
 ```
 
-### Formato Envuelto (Objeto raíz con clave)
+### Formato Envuelto JSON (Objeto raíz con clave)
 
 Común en `following.json`:
 
@@ -171,14 +171,23 @@ Común en `following.json`:
 }
 ```
 
+### Formato HTML Oficial (DOMParser pasivo)
+
+Común en exportaciones HTML de Instagram (`followers_*.html`, `following.html`):
+- Los registros se extraen de bloques de exportación `._a6-p` / `.uiBoxWhite` o enlaces canónicos `<a href="https://www.instagram.com/[_u/]{usuario}">`.
+- En listas de seguidos, se admite la extracción desde encabezados de registro (`<h2>`) si el enlace no provee directamente el usuario.
+- Decodificación automática de entidades HTML (`&commat;`, `&amp;`) mediante `textContent`.
+- Filtrado riguroso que descarta rutas de contenido (`/p/`, `/reel/`, `/stories/`, `/explore/`), enlaces institucionales/legales (`/about/`, `/legal/terms/`, `/privacy/`) y enlaces externos.
+
 ### Cuentas sin `value` explícito
 
-En algunas versiones, `value` está vacío pero el nombre figura en `title` o dentro de la URL `href` (`instagram.com/_u/{usuario}`). El parser extrae y normaliza el identificador de forma segura en cualquiera de estas variantes.
+En algunas versiones JSON, `value` está vacío pero el nombre figura en `title` o dentro de la URL `href` (`instagram.com/_u/{usuario}`). El parser extrae y normaliza el identificador de forma segura en cualquiera de estas variantes.
 
 ---
 
 ## 4. Manejo de Casos Extremos
 
-- **Listas vacías legítimas:** Cuentas nuevas o sin seguidos (`[]` o `{"relationships_following": []}`) son aceptadas como snapshots válidos de longitud cero.
-- **Registros incompletos:** Si un objeto no contiene ninguna vía válida para identificar al usuario, se lanza una excepción para evitar que una lista parcial falsee las comparaciones de seguidores perdidos.
-- **Partes faltantes:** Si un usuario con muchos seguidores recibe `followers_1.json` y `followers_2.json`, e intenta importar solo `followers_1.json`, FollowLens rechaza la importación para evitar falsos positivos de unfollow.
+- **Listas vacías legítimas:** Cuentas nuevas o sin seguidos (`[]`, `{"relationships_following": []}` o documentos HTML con encabezados relacionales reconocidos pero 0 registros) son aceptadas como snapshots válidos de longitud cero.
+- **Registros incompletos o documentos ajenos:** Si un objeto o documento HTML no contiene ninguna vía válida para identificar al usuario o proviene de una página ajena, se lanza una excepción controlada para evitar que una lista parcial o vacía falsee las comparaciones de seguidores perdidos.
+- **Partes faltantes:** Si un usuario con muchos seguidores recibe `followers_1` y `followers_2`, e intenta importar solo `followers_1`, FollowLens rechaza la importación para evitar falsos positivos de unfollow.
+- **Prohibición de formatos mezclados:** Se rechaza cualquier lote que intente combinar archivos JSON y HTML en la misma importación.

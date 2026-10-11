@@ -1,37 +1,81 @@
 import { normalize } from './relationships.ts';
 
 const IGNORED_PATH_SEGMENTS = new Set([
+  // Contenido multimedia y navegación de contenido
+  'p',
+  'reel',
+  'reels',
+  'stories',
+  'story',
+  'tv',
+  'share',
+  'create',
+  'explore',
+  'tags',
+  'locations',
+  // Institucional, legal y corporativo
   'about',
   'legal',
   'terms',
   'privacy',
-  'explore',
-  'direct',
-  'accounts',
-  'developer',
   'help',
-  'directory',
+  'support',
   'press',
+  'developer',
   'api',
+  'directory',
+  'business',
+  // Cuentas y sistema
+  'accounts',
+  'direct',
+  'emails',
+  'settings',
+  'challenge',
+  'consent',
+  'your_activity',
+  'graphql',
+  '_u',
 ]);
 
 /**
  * Extrae y normaliza un nombre de usuario de Instagram a partir de un enlace URL.
- * Soporta URLs de perfiles directas (/username) y con prefijo de exportación (/_u/username).
- * Ignora enlaces a secciones institucionales, legales o de navegación interna.
+ * Soporta exclusivamente URLs de perfiles directas (/username) y con prefijo de exportación (/_u/username).
+ * Rechaza hostnames ajenos, rutas de contenido (/p/, /reel/, /stories/, /explore/),
+ * enlaces institucionales, legales o de navegación interna.
  */
 export function extractUsernameFromUrl(href: string): string | null {
+  if (typeof href !== 'string' || !href.trim()) {
+    return null;
+  }
   try {
     const url = new URL(href, 'https://www.instagram.com');
-    if (!['www.instagram.com', 'instagram.com'].includes(url.hostname)) {
+    // Validar protocolo y hostname estricto
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
       return null;
     }
+    const hostname = url.hostname.toLowerCase();
+    if (hostname !== 'www.instagram.com' && hostname !== 'instagram.com') {
+      return null;
+    }
+
     const parts = url.pathname.split('/').filter(Boolean);
     if (!parts.length) return null;
-    const candidate = parts[0] === '_u' ? parts[1] : parts[0];
+
+    let candidate: string | null = null;
+    if (parts[0] === '_u') {
+      // Formato de exportación: /_u/{username}
+      if (parts.length !== 2) return null;
+      candidate = parts[1];
+    } else {
+      // Formato directo de perfil: /{username}
+      if (parts.length !== 1) return null;
+      candidate = parts[0];
+    }
+
     if (!candidate || IGNORED_PATH_SEGMENTS.has(candidate.toLowerCase())) {
       return null;
     }
+
     return normalize(candidate);
   } catch {
     return null;
@@ -74,14 +118,45 @@ export function parseHtmlRelationships(
   const title =
     doc.querySelector('title')?.textContent?.trim().toLowerCase() ?? '';
   const h1 = doc.querySelector('h1')?.textContent?.trim().toLowerCase() ?? '';
+  const titleOrH1 = `${title} ${h1}`;
+
+  // 1. Títulos/encabezados relacionales conocidos (multilingüe)
+  const hasRelationHeading =
+    /follow|seguid|abonn|seguit|gefolgt/i.test(titleOrH1);
+
+  // 2. Clases CSS o estructura distintiva de exportación Meta
+  const hasMetaMarkers =
+    doc.querySelector('._a6-p, ._a6-g, ._a706, ._a72d, .uiBoxWhite') !== null;
+
+  // 3. Contenedor de contenido
+  const container = doc.querySelector('main') || doc.body;
+
+  // Encontrar bloques de registros de relaciones en el orden de especificidad
+  const recordBlocks =
+    container.querySelectorAll('.uiBoxWhite').length > 0
+      ? container.querySelectorAll('.uiBoxWhite')
+      : container.querySelectorAll('._a6-p').length > 0
+        ? container.querySelectorAll('._a6-p')
+        : container.querySelectorAll('[role="main"] > div');
+
+  // Buscar todos los enlaces en el contenedor
+  const allAnchors = container.querySelectorAll('a');
+
+  let validProfileFound = false;
+  for (const a of allAnchors) {
+    const href = a.getAttribute('href');
+    if (href && extractUsernameFromUrl(href)) {
+      validProfileFound = true;
+      break;
+    }
+  }
+
+  // Documento reconocido si tiene encabezado o estilos Meta, y o bien contiene enlaces válidos
+  // o bien es una lista legítimamente vacía (sin bloques ni enlaces ajenos).
   const isLikelyExport =
-    title.includes('seguid') ||
-    title.includes('follow') ||
-    h1.includes('seguid') ||
-    h1.includes('follow') ||
-    doc.querySelector('main') !== null ||
-    doc.querySelector('._a6-p') !== null ||
-    doc.querySelector('.uiBoxWhite') !== null;
+    (hasRelationHeading || hasMetaMarkers) &&
+    (validProfileFound ||
+      (recordBlocks.length === 0 && allAnchors.length === 0));
 
   if (!isLikelyExport) {
     throw new Error(
@@ -89,18 +164,13 @@ export function parseHtmlRelationships(
     );
   }
 
-  // Ubicar el contenedor de contenido principal
-  const container = doc.querySelector('main') || doc.body;
-
-  // En exportaciones oficiales de Instagram, cada registro se agrupa en bloques uiBoxWhite / _a6-p
-  const recordBlocks = container.querySelectorAll(
-    '._a6-p, .uiBoxWhite, [role="main"] > div',
-  );
   const names = new Set<string>();
 
   if (recordBlocks.length > 0) {
     for (const block of recordBlocks) {
-      const anchor = block.querySelector('a[href*="instagram.com"]');
+      const anchor = block.querySelector(
+        'a[href*="instagram.com"], a[href^="/_u/"], a[href^="/"]',
+      );
       let username: string | null = null;
       if (anchor) {
         const href = anchor.getAttribute('href');
@@ -114,17 +184,28 @@ export function parseHtmlRelationships(
       if (!username && kind === 'following') {
         const heading = block.querySelector('h2');
         if (heading) {
-          username = normalize(heading.textContent);
+          const headingUser = normalize(heading.textContent);
+          if (
+            headingUser &&
+            !IGNORED_PATH_SEGMENTS.has(headingUser.toLowerCase())
+          ) {
+            username = headingUser;
+          }
         }
       }
       if (username) {
         names.add(username);
       }
     }
+
+    if (names.size === 0) {
+      throw new Error(
+        `No se pudieron extraer nombres de usuario válidos del archivo HTML de ${kind === 'followers' ? 'seguidores' : 'seguidos'}.`,
+      );
+    }
   } else {
     // Si la estructura no tiene bloques contenedores específicos, extraer enlaces directos
-    const anchors = container.querySelectorAll('a[href*="instagram.com"]');
-    for (const anchor of anchors) {
+    for (const anchor of allAnchors) {
       const href = anchor.getAttribute('href');
       const username = href
         ? extractUsernameFromUrl(href)
@@ -132,6 +213,12 @@ export function parseHtmlRelationships(
       if (username) {
         names.add(username);
       }
+    }
+
+    if (allAnchors.length > 0 && names.size === 0) {
+      throw new Error(
+        `No se pudieron extraer nombres de usuario válidos del archivo HTML de ${kind === 'followers' ? 'seguidores' : 'seguidos'}.`,
+      );
     }
   }
 
