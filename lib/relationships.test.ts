@@ -198,6 +198,7 @@ interface SyntheticEntry {
   compSize?: number;
   uncompSize?: number;
   flags?: number;
+  lfhFlags?: number;
   localOffset?: number;
   lfhSig?: number;
   lfhMethod?: number;
@@ -248,13 +249,14 @@ function buildSyntheticZip(
           ? entry.data.length
           : 0;
     const flags = entry.flags ?? 0;
+    const lfhFlags = entry.lfhFlags !== undefined ? entry.lfhFlags : flags;
 
     const lfhNameBytes = strToU8(entry.lfhName ?? entry.name);
     const lfh = new Uint8Array(30 + lfhNameBytes.length);
     const lv = new DataView(lfh.buffer);
     lv.setUint32(0, entry.lfhSig ?? 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, flags, true);
+    lv.setUint16(6, lfhFlags, true);
     lv.setUint16(8, entry.lfhMethod !== undefined ? entry.lfhMethod : method, true);
     lv.setUint16(10, 0, true);
     lv.setUint16(12, 0, true);
@@ -517,7 +519,7 @@ test('inconsistencia de encabezado local y bit 3 con marcadores legitimately val
     /Firma de encabezado local inválida/i,
   );
 
-  // 3. Nombre de archivo LFH inconsistente con CD
+  // 3. Nombre de archivo LFH inconsistente con CD (nombre base diferente)
   const zipBadLfhName = buildSyntheticZip([
     { name: 'followers_1.json', data: f1, method: 8, lfhName: 'otro_nombre.json' },
     { name: 'following.json', data: fol, method: 8 },
@@ -527,14 +529,63 @@ test('inconsistencia de encabezado local y bit 3 con marcadores legitimately val
     /Inconsistencia de nombre de archivo entre encabezado local y directorio central/i,
   );
 
-  // 4. Bit 3 activo: LFH tiene marcadores en 0 para CRC, tamaño comprimido y tamaño descompreso.
+  // 3b. Nombre de archivo LFH inconsistente con CD en ruta completa (mismo nombre base, carpeta distinta)
+  const zipBadLfhPath = buildSyntheticZip([
+    {
+      name: 'connections/followers_and_following/followers_1.json',
+      data: f1,
+      method: 8,
+      lfhName: 'spoofed_folder/followers_and_following/followers_1.json',
+    },
+    { name: 'following.json', data: fol, method: 8 },
+  ]);
+  await assert.rejects(
+    importFiles([new File([zipBadLfhPath as BlobPart], 'badlfhpath.zip')]),
+    /Inconsistencia de nombre de archivo entre encabezado local y directorio central/i,
+  );
+
+  // 4a. Inconsistencia de bandera bit 3: CD tiene bit 3 inactivo pero LFH lo tiene activo
+  const zipBit3Mismatch = buildSyntheticZip([
+    {
+      name: 'followers_1.json',
+      data: f1,
+      method: 8,
+      flags: 0x0000,
+      lfhFlags: 0x0008,
+    },
+    { name: 'following.json', data: fol, method: 8 },
+  ]);
+  await assert.rejects(
+    importFiles([new File([zipBit3Mismatch as BlobPart], 'bit3mismatch.zip')]),
+    /Inconsistencia en banderas \(bit 3\) entre encabezado local y directorio central/i,
+  );
+
+  // 4b. Bit 3 inactivo pero LFH no coincide con los valores del CD
+  const zipNoBit3Mismatch = buildSyntheticZip([
+    {
+      name: 'followers_1.json',
+      data: f1,
+      method: 8,
+      flags: 0x0000,
+      lfhFlags: 0x0000,
+      lfhCrc: 0x12345678, // No coincide con CD crc
+    },
+    { name: 'following.json', data: fol, method: 8 },
+  ]);
+  await assert.rejects(
+    importFiles([new File([zipNoBit3Mismatch as BlobPart], 'nobit3mismatch.zip')]),
+    /Inconsistencia de integridad entre encabezado local y directorio central/i,
+  );
+
+  // 4c. Bit 3 activo coherente en ambos: LFH tiene marcadores en 0 para CRC, tamaño comprimido y descompreso.
   // El CD contiene los valores reales definitivos.
   const zipBit3 = buildSyntheticZip([
     {
       name: 'followers_1.json',
       data: f1,
       method: 8,
-      flags: 0x0008, // bit 3 activo
+      flags: 0x0008, // bit 3 activo en CD
+      lfhFlags: 0x0008, // bit 3 activo en LFH
       lfhCrc: 0,
       lfhCompSize: 0,
       lfhUncompSize: 0,
@@ -647,6 +698,16 @@ test('rechazo de offsets invalidos, rangos fuera de limites y discrepancias de t
     importFiles([new File([zipSizeMismatch as BlobPart], 'mismatch.zip')]),
     /tiene un tamaño descomprimido inconsistente con el declarado/i,
   );
+
+  // 4. Presupuesto acumulado de lectura comprimida excedido (>30 MB)
+  const zipCompressedExceeded = buildSyntheticZip([
+    { name: 'followers_1.json', data: f1, method: 8, compSize: 35 * 1024 * 1024 },
+    { name: 'following.json', data: fol, method: 8 },
+  ]);
+  await assert.rejects(
+    importFiles([new File([zipCompressedExceeded as BlobPart], 'exceededcomp.zip')]),
+    /Los JSON superan el límite de 30 MB o 1\.000 archivos/i,
+  );
 });
 
 test('detencion temprana de descompresion ante bombas ZIP altamente comprimibles', () => {
@@ -670,12 +731,14 @@ test('ignora archivos multimedia sin solicitar sus rangos de datos ni descomprim
   photoBytes.fill(111);
   const videoBytes = new Uint8Array(75000);
   videoBytes.fill(222);
+  const ignoredTail = new Uint8Array(70000);
 
   const rawZip = buildSyntheticZip([
     { name: 'followers_1.json', data: f1, method: 8 },
     { name: 'following.json', data: fol, method: 8 },
     { name: 'media/photo.jpg', data: photoBytes, method: 0 },
     { name: 'media/video.mp4', data: videoBytes, method: 0 },
+    { name: 'messages/chats.txt', data: ignoredTail, method: 0 },
   ]);
 
   // Espiar los rangos solicitados por slice()
@@ -693,26 +756,31 @@ test('ignora archivos multimedia sin solicitar sus rangos de datos ni descomprim
   assert.equal(res.fileCount, 2);
   assert.deepEqual(res.followers, ['ana']);
 
-  // Calcular la ventana de bytes donde residen los datos binarios multimedia
+  // Calcular las regiones exactas de datos multimedia (contenido binario)
   // Entrada 1: followers_1 (LFH + compData)
   // Entrada 2: following (LFH + compData)
   // Entrada 3: media/photo.jpg (LFH + photoBytes)
   // Entrada 4: media/video.mp4 (LFH + videoBytes)
-  // Ningún rango de datos de photoBytes ni videoBytes debe haber sido solicitado
   const lfh1Len = 30 + strToU8('followers_1.json').length;
   const f1Comp = deflateSync(f1).length;
   const lfh2Len = 30 + strToU8('following.json').length;
   const folComp = deflateSync(fol).length;
-  const mediaStartOffset = lfh1Len + f1Comp + lfh2Len + folComp;
-  const mediaEndOffset = mediaStartOffset + 30 + strToU8('media/photo.jpg').length + 75000 + 30 + strToU8('media/video.mp4').length + 75000;
+  const photoLfhStart = lfh1Len + f1Comp + lfh2Len + folComp;
+  const photoDataStart = photoLfhStart + 30 + strToU8('media/photo.jpg').length;
+  const photoDataEnd = photoDataStart + 75000;
+
+  const videoLfhStart = photoDataEnd;
+  const videoDataStart = videoLfhStart + 30 + strToU8('media/video.mp4').length;
+  const videoDataEnd = videoDataStart + 75000;
 
   for (const [start, end] of requestedRanges) {
-    // Si una solicitud cae dentro de la ventana de medios, es una violación
-    const overlapsMediaData = start >= mediaStartOffset && end <= mediaEndOffset;
+    // Detectar cualquier intersección entre el rango solicitado [start, end] y las regiones de datos multimedia
+    const intersectsPhoto = Math.max(start, photoDataStart) < Math.min(end, photoDataEnd);
+    const intersectsVideo = Math.max(start, videoDataStart) < Math.min(end, videoDataEnd);
     assert.equal(
-      overlapsMediaData,
+      intersectsPhoto || intersectsVideo,
       false,
-      `Se solicitó un rango de datos perteneciente a multimedia: [${start}, ${end}]`,
+      `Se solicitó un rango que intersecta contenido multimedia: [${start}, ${end}] (foto: [${photoDataStart}, ${photoDataEnd}], video: [${videoDataStart}, ${videoDataEnd}])`,
     );
   }
 });

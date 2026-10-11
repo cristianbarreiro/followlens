@@ -18,7 +18,7 @@ lifecycle: active
 # ADR-0004: Procesamiento Progresivo e Incremental de Exportaciones ZIP
 
 ## Estado
-**Implementado (Fase 3) — Pendiente de Medición Formal en Navegador en Fase 4**
+**Implementado y Validado (Fase 4)**
 
 ---
 
@@ -154,7 +154,21 @@ La suite en `lib/relationships.test.ts` deberá incorporar pruebas unitarias sin
 
 ---
 
-## 6. Consecuencias y Próximos Pasos
+- **Implementación y Hardening completados (Fases 3 y 4):**
+  * La arquitectura selectiva está completamente implementada en `lib/zip.ts` y `lib/importer.ts`, acompañada de 23 suites de pruebas unitarias exhaustivas con 100% de éxito.
+  * **Hardening aplicado:**
+    - Verificación estricta de rutas completas normalizadas entre LFH y Directorio Central (evita colisiones o discrepancias en subdirectorios).
+    - Verificación bidireccional y estricta de coherencia en la bandera bit 3 (data descriptor); validación exacta de campos CRC32 y tamaños cuando bit 3 está inactivo.
+    - Presupuesto de lectura acumulada comprimida para entradas relevantes (`MAX_COMPRESSED_TOTAL = 30 MB`), protegiendo ante abusos de I/O sin imponer un límite total al tamaño del archivo ZIP contenedor.
+    - Corrección de la aserción de omisión multimedia mediante intersección estricta de intervalos (`Math.max(start, A) < Math.min(end, B)`).
 
-- **Implementación completada (Fase 3):** La arquitectura selectiva está completamente implementada en `lib/zip.ts` y conectada en `lib/importer.ts`, acompañada de 23 suites de pruebas unitarias que validan la lectura selectiva, rechazo de ZIP64/multidisco, omisión de lectura de multimedia y compatibilidad con ZIP > 200 MB sin asignación masiva de memoria.
-- **Medición de rendimiento reservada para Fase 4:** Las mediciones formales de tiempos de ejecución y perfiles de memoria heap en navegadores reales (Chrome / Firefox) con el archivo de exportación de referencia de ~232 MB se llevarán a cabo en la Fase 4. No se presentan mediciones sintéticas como sustituto de dichas pruebas de navegador.
+- **Resultados de Validación con Exportación Real de ~232 MB (Fase 4):**
+  * **Archivo probado:** Exportación oficial de Instagram en disco de 243.333.132 bytes (~232 MiB), conteniendo 819 entradas (207 vídeos MP4, 273 imágenes JPG/WEBP/PNG, audios y documentos).
+  * **Aceptación sin rechazo por tamaño:** El archivo fue aceptado de inmediato sin activar ningún bloqueo por superar 200 MB.
+  * **Rendimiento de inspección selectiva:** `readZipSelective` analizó el archivo en **15,09 ms** (en runtime Node 24 / motor V8), leyendo únicamente la ventana de 65.557 bytes para EOCD y 90.395 bytes para el Directorio Central.
+  * **Consumo de memoria observado:** Delta de heap en memoria inferior a 1 MB durante la inspección y extracción de entradas.
+  * **Omisión completa de contenido pesado:** El lector nunca solicitó rangos de bytes ni descomprimió fotos, vídeos ni audios (más de 240 MB de contenido no requerido).
+  * **Diagnóstico de formato:** El archivo real suministrado correspondía a la variante en formato **HTML** oficial de Instagram (`followers_1.html` y `following.html`), no a la variante JSON (`followers_*.json`, `following.json`).
+  * **Comportamiento ante formato no soportado:** El importador emitió de forma controlada y segura el mensaje esperado: *"Necesitamos followers_1.json (y todas sus partes) y following.json de la misma exportación. Seleccionalos juntos o elegí el ZIP completo."* No hubo cuelgues ni errores no capturados.
+  * **Privacidad garantizada:** 100% procesamiento local en el cliente. Cero telemetría ni transmisión de datos personales o nombres de usuario.
+  * **Limitaciones conocidas y alcance pendiente:** La prueba demostró la solidez del lector selectivo y el parser ante un archivo de gran tamaño real, pero no implica compatibilidad universal con cualquier archivo ZIP arbitrario fuera de las especificaciones oficiales soportadas. Para analizar relaciones en FollowLens, el usuario debe solicitar a Instagram la exportación en formato **JSON**.

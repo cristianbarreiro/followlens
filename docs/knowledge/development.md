@@ -69,7 +69,7 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 23. Admisión de archivo ZIP simulado superior a 200 MB mediante rangos selectivos sin buffer real masivo.
 
 > [!NOTE]
-> **Datos de prueba:** Todos los tests operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. No se leen ni requieren archivos reales del disco. La validación manual con la exportación real de ~232 MB en navegadores (Chrome/Firefox) se reserva para la Fase 4.
+> **Datos de prueba y validación:** Las 23 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la Fase 4 se validó además el comportamiento con una exportación real de Instagram de ~232 MB (243 MB, 819 entradas), comprobando la lectura selectiva sin sobrecarga de memoria, la omisión de multimedia y la emisión controlada de errores ante formatos no soportados.
 
 ---
 

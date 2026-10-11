@@ -2,6 +2,7 @@ import { Inflate } from 'fflate';
 
 export const MAX_JSON_ENTRY = 30 * 1024 * 1024; // 30 MiB por entrada individual
 export const MAX_JSON_TOTAL = 30 * 1024 * 1024; // 30 MiB acumulados para JSONs relevantes
+export const MAX_COMPRESSED_TOTAL = 30 * 1024 * 1024; // 30 MiB acumulados comprimidos para entradas relevantes
 export const MAX_CENTRAL_DIR_SIZE = 16 * 1024 * 1024; // 16 MiB presupuesto para directorio central
 export const MAX_RELEVANT_ENTRIES = 1000; // Máximo de entradas relacionales seleccionadas
 
@@ -244,12 +245,14 @@ export async function readZipSelective(
   }
 
   let declaredTotal = 0;
+  let declaredCompressedTotal = 0;
   for (const entry of relevant) {
     if (entry.uncompressedSize > MAX_JSON_ENTRY || entry.compressedSize > MAX_JSON_ENTRY) {
       throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
     }
     declaredTotal += entry.uncompressedSize;
-    if (declaredTotal > MAX_JSON_TOTAL) {
+    declaredCompressedTotal += entry.compressedSize;
+    if (declaredTotal > MAX_JSON_TOTAL || declaredCompressedTotal > MAX_COMPRESSED_TOTAL) {
       throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
     }
   }
@@ -257,9 +260,15 @@ export async function readZipSelective(
   // 6. Extracción selectiva de cada entrada relevante
   const results: Record<string, Uint8Array> = {};
   let cumulativeExtracted = 0;
+  let cumulativeCompressedRead = 0;
 
   for (const entry of relevant) {
     const entryBase = entry.name.replaceAll('\\', '/').split('/').pop()!.toLowerCase();
+
+    cumulativeCompressedRead += entry.compressedSize;
+    if (cumulativeCompressedRead > MAX_COMPRESSED_TOTAL) {
+      throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
+    }
 
     if (entry.localOffset < 0 || entry.localOffset + 30 > source.size || entry.localOffset + 30 > cdOffset) {
       throw new Error('Offset de encabezado local fuera de los límites del archivo.');
@@ -288,16 +297,23 @@ export async function readZipSelective(
       throw new Error('Inconsistencia en método de compresión entre encabezado local y directorio central.');
     }
 
-    // Bit 3: descriptor de datos posterior. Si no está activo, verificar consistencia.
-    const hasDataDescriptor = (lfhFlag & 0x0008) !== 0;
-    if (!hasDataDescriptor) {
+    // Bit 3: descriptor de datos posterior. Validar coherencia entre CD y LFH.
+    const cdBit3 = (entry.flag & 0x0008) !== 0;
+    const lfhBit3 = (lfhFlag & 0x0008) !== 0;
+    if (cdBit3 !== lfhBit3) {
+      throw new Error('Inconsistencia en banderas (bit 3) entre encabezado local y directorio central.');
+    }
+
+    if (!cdBit3) {
       const lfhCrc = lfhView.getUint32(14, true);
       const lfhComp = lfhView.getUint32(18, true);
       const lfhUncomp = lfhView.getUint32(22, true);
-      if (lfhCrc !== 0 || lfhComp !== 0 || lfhUncomp !== 0) {
-        if (lfhCrc !== entry.crc32 || lfhComp !== entry.compressedSize || lfhUncomp !== entry.uncompressedSize) {
-          throw new Error('Inconsistencia de integridad entre encabezado local y directorio central.');
-        }
+      if (
+        lfhCrc !== entry.crc32 ||
+        lfhComp !== entry.compressedSize ||
+        lfhUncomp !== entry.uncompressedSize
+      ) {
+        throw new Error('Inconsistencia de integridad entre encabezado local y directorio central.');
       }
     }
 
@@ -306,13 +322,15 @@ export async function readZipSelective(
       throw new Error('Encabezado local fuera de los límites del archivo.');
     }
 
-    if (lfhFnLen > 0) {
-      const lfhNameBuf = await source.slice(entry.localOffset + 30, entry.localOffset + 30 + lfhFnLen).arrayBuffer();
-      const lfhName = new TextDecoder('utf-8').decode(new Uint8Array(lfhNameBuf));
-      const lfhBase = lfhName.replaceAll('\\', '/').split('/').pop()?.toLowerCase();
-      if (lfhBase !== entryBase) {
-        throw new Error('Inconsistencia de nombre de archivo entre encabezado local y directorio central.');
-      }
+    const lfhNameBuf =
+      lfhFnLen > 0
+        ? await source.slice(entry.localOffset + 30, entry.localOffset + 30 + lfhFnLen).arrayBuffer()
+        : new ArrayBuffer(0);
+    const lfhName = new TextDecoder('utf-8').decode(new Uint8Array(lfhNameBuf));
+    const normLfhName = lfhName.replaceAll('\\', '/').toLowerCase();
+    const normEntryName = entry.name.replaceAll('\\', '/').toLowerCase();
+    if (normLfhName !== normEntryName) {
+      throw new Error('Inconsistencia de nombre de archivo entre encabezado local y directorio central.');
     }
 
     const dataOffset = entry.localOffset + lfhTotalHeader;
