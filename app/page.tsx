@@ -470,8 +470,8 @@ export default function Home() {
                 </span>
                 <h2>Empezá con tus datos</h2>
                 <p>
-                  Importá tu exportación de Instagram en ZIP o JSON. Todo se
-                  analiza acá, en tu navegador.
+                  Importá tu exportación de Instagram en ZIP o archivos JSON o
+                  HTML. Todo se analiza acá, en tu navegador.
                 </p>
                 <div className="actions">
                   <button
@@ -1068,15 +1068,18 @@ export default function Home() {
             <li>
               <strong>Elegí seguidores y seguidos</strong>
               <p>
-                Seleccioná formato JSON y período Todo el tiempo. Incluí todas
-                las partes de seguidores.
+                Elegí formato JSON o HTML y período Todo el tiempo. Incluí
+                todas las partes de seguidores y usá el mismo formato para
+                seguidores y seguidos.
               </p>
             </li>
             <li>
-              <strong>Importá el ZIP o los JSON</strong>
+              <strong>Importá el ZIP o los archivos individuales</strong>
               <p>
-                Indicá la cuenta y la fecha a la que corresponden los datos.
-                Para ver cambios, importá dos fechas de la misma cuenta.
+                El ZIP puede contener los datos en JSON o HTML. También podés
+                seleccionar archivos JSON o HTML individuales, sin mezclar
+                formatos. Indicá la cuenta y la fecha a la que corresponden los
+                datos. Para ver cambios, importá dos fechas de la misma cuenta.
               </p>
             </li>
           </ol>

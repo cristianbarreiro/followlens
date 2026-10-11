@@ -35,15 +35,19 @@ export function ImportDialog({
     [persist, setPersist] = useState(false),
     [complete, setComplete] = useState(false),
     [busy, setBusy] = useState(false),
+    [processing, setProcessing] = useState(''),
     [error, setError] = useState(''),
     [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const submitting = useRef(false);
   const choose = (items: File[]) => {
     setFiles(items);
     setError('');
+    setProcessing('');
   };
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting.current) return;
     setError('');
     const normalized = normalize(handle);
     if (!normalized) {
@@ -62,9 +66,16 @@ export function ImportDialog({
       setError('Confirmá que incluís todos los seguidores y seguidos.');
       return;
     }
+    submitting.current = true;
     setBusy(true);
+    setProcessing('Leyendo y validando los archivos en este dispositivo…');
     try {
       const result = await importFiles(files);
+      setProcessing(
+        persist
+          ? 'Guardando la importación y actualizando resultados…'
+          : 'Actualizando resultados…',
+      );
       await onImport(
         {
           id: crypto.randomUUID(),
@@ -83,7 +94,9 @@ export function ImportDialog({
           ? err.message
           : 'No se pudo importar. Intentá otra vez.',
       );
+      setProcessing('');
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -125,12 +138,12 @@ export function ImportDialog({
             <strong>
               {files.length
                 ? `${files.length} archivo${files.length === 1 ? '' : 's'} seleccionado${files.length === 1 ? '' : 's'}`
-                : 'Arrastrá tu ZIP, tus JSON o tus HTML'}
+                : 'Arrastrá un ZIP o archivos JSON/HTML'}
             </strong>
             <p>
               {files.length
                 ? files.map((f) => f.name).join(', ')
-                : 'Exportación ZIP completa (JSON o HTML de seguidores y seguidos) · Archivos individuales hasta 30 MB'}
+                : 'ZIP o archivos individuales JSON/HTML del mismo formato, con seguidores y seguidos · Hasta 30 MB por archivo individual'}
             </p>
             <button
               type="button"
@@ -203,6 +216,11 @@ export function ImportDialog({
             <p className="error" role="alert">
               {error}
             </p>
+          )}
+          {processing && (
+            <output className="processing-note" aria-live="polite">
+              {processing}
+            </output>
           )}
           <button className="btn primary full" disabled={busy || !files.length}>
             {busy ? (

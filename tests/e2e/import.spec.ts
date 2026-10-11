@@ -117,9 +117,15 @@ async function openImportDialog(page: Page) {
   await expect(
     page.getByRole('heading', { name: 'Lo que cambia. Lo que importa.' }),
   ).toBeVisible();
+  await expect(page.getByText(/ZIP o archivos JSON o HTML/)).toBeVisible();
   await page.getByRole('button', { name: 'Importar datos' }).click();
   const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
   await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByText(
+      /ZIP o archivos individuales JSON\/HTML del mismo formato/,
+    ),
+  ).toBeVisible();
   return dialog;
 }
 
@@ -188,6 +194,23 @@ async function assertBrowserPrivacy(signals: BrowserSignals) {
 test('imports a synthetic JSON ZIP through the UI and shows dashboard relationships', async ({
   page,
 }) => {
+  await page.addInitScript(`
+    (() => {
+      const read = Blob.prototype.arrayBuffer;
+      let held = false;
+      Blob.prototype.arrayBuffer = function () {
+        if (held) return read.call(this);
+        held = true;
+        return new Promise((resolve, reject) => {
+          window.addEventListener(
+            'followlens-release-file-read',
+            () => read.call(this).then(resolve, reject),
+            { once: true },
+          );
+        });
+      };
+    })();
+  `);
   const signals = monitorBrowser(page);
   const dialog = await openImportDialog(page);
   await chooseFiles(
@@ -200,6 +223,16 @@ test('imports a synthetic JSON ZIP through the UI and shows dashboard relationsh
     'synthetic-json.zip',
   );
   await submitImport(dialog);
+  const processing = dialog.getByRole('status');
+  await expect(processing).toHaveText(
+    'Leyendo y validando los archivos en este dispositivo…',
+  );
+  await expect(
+    dialog.getByRole('button', { name: 'Analizando en tu dispositivo…' }),
+  ).toBeDisabled();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event('followlens-release-file-read')),
+  );
 
   await expect(dialog).toBeHidden();
   await expect(successNotice(page)).toBeVisible();
@@ -272,6 +305,7 @@ test('imports standalone multipart HTML and preserves filename and format valida
   await expect(dialog.getByRole('alert')).toContainText(
     'Falta una parte de followers',
   );
+  await expect(dialog.getByRole('status')).toHaveCount(0);
   await expect(
     dialog.getByText(incompleteNames, { exact: true }),
   ).toBeVisible();
@@ -356,6 +390,7 @@ test('reports corrupted ZIPs without partial results and allows retry', async ({
   await expect(error).toBeVisible();
   await expect(error).toContainText(/ZIP|archivo|dañado/i);
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('status')).toHaveCount(0);
   await expect(successNotice(page)).toHaveCount(0);
   await expect(
     page.getByRole('heading', { name: 'Tus relaciones.' }),
