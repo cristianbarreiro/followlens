@@ -199,3 +199,17 @@ _Nota:_ La validación con la exportación real del usuario (~232 MB) se reserva
     - Validación y feedback inmediato ante envíos incompletos o sin confirmación.
     - Diseño responsive validado en resoluciones móviles (375x667) y de escritorio (1280x800).
     - Cero errores o excepciones no controladas en la consola del navegador.
+
+## 7. Línea de Base de Rendimiento Sintética (Fase 9)
+
+La línea de base reproducible opt-in está disponible con `npm run benchmark:importer` (Node.js 24+, `--expose-gc`). Genera fixtures en memoria y separa lectura EOCD/directorio central, rangos de extracción, parsing, cálculo de relaciones e importación total. También incluye un ZIP sintético con 32 MiB de contenido irrelevante, un payload JSON que alcanza exactamente el presupuesto descomprimido de 30 MiB y otro que lo excede por un byte.
+
+En Windows con Node.js 24.16.0 / V8 13.6.233.17:
+
+- JSON mediano de 10.000 seguidores y 8.000 seguidos (2.500 mutuos, 0,947 MiB descomprimidos): extracción/integridad observada en 29 ms, parsing en 27 ms, relaciones en 5 ms e importación total en 45 ms. Son timers separados; su suma no representa el tiempo total porque las fases fueron cronometradas en corridas separadas dentro del benchmark y hay variación de scheduler.
+- ZIP de 32 MiB con contenido multimedia sintético irrelevante y solo 3.720 bytes relacionales: importación en ~1 ms. El lector solicitó la ventana EOCD de 65.557 bytes, 259 bytes del directorio central y 3.882 bytes de rangos relacionales; nunca pidió el rango de datos del medio. La prueba sintética unitaria existente mantiene la cobertura de un contenedor sparse superior a 200 MiB sin materializarlo.
+- Presupuesto máximo sintético de exactamente 30 MiB: aceptado en 315 ms; 1 byte adicional: rechazado con error controlado.
+- Se evaluó un prototipo de escritura DEFLATE al buffer declarado. Aunque el microbenchmark aislado fue más rápido, la importación completa del fixture exacto al límite no mostró mejora concluyente y los snapshots de memoria no acreditaron una reducción del pico. El prototipo se descartó; el código de producción permanece sin cambios.
+- En Chromium real de Playwright 1.64.0 (Chromium 156.0.8078.4), dos importaciones UI JSON pequeñas sintéticas tomaron 114–162 ms; `performance.memory` mostró 37,3 MB antes/después (límite reportado 3.760 MB). Esta medida es específica de Chromium, aproximada y no representa un ZIP de 30 MiB.
+
+Los datos anteriores son mediciones de una máquina local, descriptivas y no umbrales de CI. Node `heapUsed` no es memoria total del proceso ni del navegador; los snapshots por etapa no capturan necesariamente el máximo de una operación síncrona. Para el payload exacto, RSS se observó en ~77 MiB antes, ~138 MiB inmediatamente después y ~78 MiB tras ceder el event loop y forzar GC; `arrayBuffers` volvió a ~0,32 MiB y permaneció estable después de una segunda importación. La medición histórica de exportación real de 243.333.132 bytes (~232 MiB), 224,91 ms y delta de heap de 2,03 MB corresponde a otra validación anterior y no se repitió ni se mezcló con estos fixtures sintéticos.

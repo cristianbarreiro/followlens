@@ -13,6 +13,7 @@
     "format": "oxfmt",
     "test": "node --test lib/relationships.test.ts",
     "test:e2e": "playwright test",
+    "benchmark:importer": "node --expose-gc scripts/importer-benchmark.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

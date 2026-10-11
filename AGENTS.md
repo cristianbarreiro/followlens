@@ -88,6 +88,7 @@ Derived directly from `package.json`:
 | **Development** | `npm run dev` | Start Vite/Vinext dev server with HMR. | |
 | **Build** | `npm run build` | Compile production client and SSR bundles. | `vinext build` (Vite 8.2.2). |
 | **Testing** | `npm test` | Run 34 unit tests. | `node --test lib/relationships.test.ts`. |
+| **Importer benchmark** | `npm run benchmark:importer` | Measure synthetic import stages and resource snapshots in Node.js. | Optional local benchmark; no timing thresholds. |
 | **Browser E2E** | `npm run test:e2e` | Run importer regressions in Chromium. | Install once with `npx playwright install chromium`. |
 | **Typecheck** | `npm run typecheck` | Run strict TypeScript validation. | `tsc --noEmit`. |
 | **Formatting** | `npm run format` | Run code formatter via `oxfmt`. | |

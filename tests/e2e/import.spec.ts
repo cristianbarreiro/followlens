@@ -222,6 +222,20 @@ test('imports a synthetic JSON ZIP through the UI and shows dashboard relationsh
     ),
     'synthetic-json.zip',
   );
+  const browserBefore = await page.evaluate(() => {
+    const memory = (
+      performance as Performance & {
+        memory?: {
+          usedJSHeapSize: number;
+          jsHeapSizeLimit: number;
+        };
+      }
+    ).memory;
+    return {
+      heapUsedBytes: memory?.usedJSHeapSize ?? null,
+      heapLimitBytes: memory?.jsHeapSizeLimit ?? null,
+    };
+  });
   await submitImport(dialog);
   const processing = dialog.getByRole('status');
   await expect(processing).toHaveText(
@@ -230,11 +244,39 @@ test('imports a synthetic JSON ZIP through the UI and shows dashboard relationsh
   await expect(
     dialog.getByRole('button', { name: 'Analizando en tu dispositivo…' }),
   ).toBeDisabled();
-  await page.evaluate(() =>
-    window.dispatchEvent(new Event('followlens-release-file-read')),
-  );
+  const browserProcessingStartedAt = await page.evaluate(() => {
+    const startedAt = performance.now();
+    window.dispatchEvent(new Event('followlens-release-file-read'));
+    return startedAt;
+  });
 
   await expect(dialog).toBeHidden();
+  const browserAfter = await page.evaluate(() => {
+    const memory = (
+      performance as Performance & {
+        memory?: {
+          usedJSHeapSize: number;
+        };
+      }
+    ).memory;
+    return {
+      elapsedMs: performance.now(),
+      heapUsedBytes: memory?.usedJSHeapSize ?? null,
+    };
+  });
+  console.log(
+    JSON.stringify({
+      browserScenario: 'synthetic-small-json-zip-ui-import',
+      browserVersion: page.context().browser()?.version() ?? 'unknown',
+      elapsedMs: Number(
+        (browserAfter.elapsedMs - browserProcessingStartedAt).toFixed(2),
+      ),
+      chromiumJsHeapBeforeBytes: browserBefore.heapUsedBytes,
+      chromiumJsHeapAfterBytes: browserAfter.heapUsedBytes,
+      chromiumJsHeapLimitBytes: browserBefore.heapLimitBytes,
+      note: 'Synthetic data; elapsed time includes Playwright close observation; heap API is approximate.',
+    }),
+  );
   await expect(successNotice(page)).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Tus relaciones.' }),
