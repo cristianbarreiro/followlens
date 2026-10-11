@@ -12,6 +12,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "test": "node --test lib/relationships.test.ts",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -40,6 +41,7 @@
     "@cloudflare/vite-plugin": "1.54.4",
     "@cloudflare/workers-types": "5.20260903.1",
     "@openai/sites-vite-plugin": "0.2.0",
+    "@playwright/test": "1.64.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

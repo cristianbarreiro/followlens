@@ -27,15 +27,16 @@ lifecycle: stable
 
 Todos los comandos se ejecutan desde la raíz del proyecto:
 
-| Comando             | Acción                                                    | Herramienta                                       | Notas                                       |
-| ------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
-| `npm run dev`       | Inicia el servidor de desarrollo local con HMR.           | `vinext dev`                                      | Entorno Vite 8 con Vinext.                  |
-| `npm run build`     | Compila la aplicación completa para producción.           | `vinext build`                                    | Compila bundles cliente y SSR.              |
-| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 34 tests unitarios nativos (0 suites).      |
-| `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.     |
-| `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.    |
-| `npm run lint`      | Ejecuta el análisis estático de código.                   | `oxlint`                                          | Véase Sección 4 para diagnóstico de linter. |
-| `npm run start`     | Arranca el runtime local de Cloudflare Worker / Wrangler. | `wrangler dev --config dist/server/wrangler.json` | Emulación local.                            |
+| Comando             | Acción                                                    | Herramienta                                       | Notas                                             |
+| ------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+| `npm run dev`       | Inicia el servidor de desarrollo local con HMR.           | `vinext dev`                                      | Entorno Vite 8 con Vinext.                        |
+| `npm run build`     | Compila la aplicación completa para producción.           | `vinext build`                                    | Compila bundles cliente y SSR.                    |
+| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 34 tests unitarios nativos (0 suites).            |
+| `npm run test:e2e`  | Ejecuta regresiones de importación en Chromium real.      | Playwright Test                                   | Inicia Vinext local; requiere Chromium instalado. |
+| `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.           |
+| `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.          |
+| `npm run lint`      | Ejecuta el análisis estático de código.                   | `oxlint`                                          | Véase Sección 4 para diagnóstico de linter.       |
+| `npm run start`     | Arranca el runtime local de Cloudflare Worker / Wrangler. | `wrangler dev --config dist/server/wrangler.json` | Emulación local.                                  |
 
 ---
 
@@ -83,13 +84,27 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 > [!NOTE]
 > **Datos de prueba y validación:** Las 34 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la salida de `node:test`, se reportan 34 tests pasados y 0 suites (archivo único de ejecución). Las mediciones con la exportación real de Instagram de ~232 MB (243 MB, 819 entradas) corresponden a mediciones en Node 24 / V8 en el entorno de desarrollo y auditorías visuales del navegador local, manteniéndose diferenciadas de las aserciones de la suite de pruebas automatizadas.
 
+### Regresiones de importación en navegador
+
+La suite `tests/e2e/import.spec.ts` usa Playwright Test con Chromium y archivos ZIP/HTML sintéticos creados durante la prueba. Recorre la selección real de archivos y el diálogo, valida los resultados visibles del dashboard, ejercita errores y recuperación y comprueba que no se produzcan errores de consola ni solicitudes externas durante la importación. No se usan exportaciones reales y no se persisten los datos de prueba.
+
+Instalá el navegador una vez por entorno y ejecutá la suite desde la raíz:
+
+```sh
+npx playwright install chromium
+npm run test:e2e
+```
+
+Playwright inicia automáticamente el servidor local de Vinext en `localhost:4173`. Los artefactos de prueba se escriben en `test-results/` (ignorado por Git), con capturas, video y trazas desactivados. El repositorio no contiene actualmente workflows de CI; por eso la suite se documenta como comando reproducible sin agregar un workflow nuevo.
+
 ---
 
 ## 4. Estado del Linter (`oxlint`)
 
 - `npm run lint` ejecuta `oxlint` con `typeAware: true`.
-- Actualmente, reporta observaciones preexistentes derivadas de componentes autogenerados de UI (`components/ui/chart.tsx`) y promesas no envueltas en el bloque `test(...)` de `node:test`.
-- **Regla del repositorio:** No alterar código funcional de la UI ni de componentes de visualización solo para silenciar advertencias externas del linter, salvo requerimiento explícito.
+- Actualmente, `npm run lint` termina con errores preexistentes en `components/ui/*` (accesibilidad y React Compiler), `app/page.tsx` (React Compiler, accesibilidad y navegación), `components/import-dialog.tsx` (asociación de labels y `FormEvent` obsoleto), `components/ui/chart.tsx` (interpolaciones de tipos) y promesas no envueltas de `node:test` en `lib/relationships.test.ts`.
+- Los archivos E2E añadidos se pueden comprobar de forma aislada con `npx oxlint playwright.config.ts tests/e2e/import.spec.ts`; esa comprobación no reporta hallazgos.
+- **Regla del repositorio:** No alterar código funcional ajeno a la tarea solo para silenciar hallazgos preexistentes del linter, salvo requerimiento explícito.
 - Para el cierre de tareas regulares, el criterio de validación obligatoria se enfoca en la suite de pruebas, TypeScript y compilación de producción.
 
 ---
