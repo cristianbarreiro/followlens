@@ -2,14 +2,15 @@
 okf_version: "0.2"
 type: Architecture
 title: Arquitectura del Sistema FollowLens
-description: Especificación técnica integral de componentes, responsabilidades, límites de diseño y flujo operativo.
+description: Especificación técnica integral de componentes, responsabilidades, límites de diseño, estado actual y evolución incremental.
 tags:
   - architecture
   - react19
   - vinext
   - vite
   - client-side
-timestamp: "2026-09-07T14:20:00-03:00"
+  - incremental-importer
+timestamp: "2026-10-11T02:00:00-03:00"
 lifecycle: stable
 ---
 
@@ -41,7 +42,7 @@ components/
 └── ui/                          ── Primitives visuales basados en shadcn/ui (radix / base-ui)
 
 lib/
-├── importer.ts                  ── Descompresión streaming con fflate, validación de límites y partes
+├── importer.ts                  ── Descompresión con fflate, validación de límites e integridad de partes
 ├── relationships.ts             ── Lógica pura de conjuntos, normalización de usernames, timeline y CSV
 ├── storage.ts                   ── Adaptador de persistencia local en IndexedDB (base 'followlens-local')
 ├── demo.ts                      ── Generador de snapshots sintéticos para exploración sin archivos
@@ -51,45 +52,71 @@ lib/
 
 ---
 
-## 4. HOW — Flujo de Ejecución y Transformación
+## 4. HOW — Flujo Actual vs. Arquitectura Objetivo
+
+### Estado Actual de la Implementación (`lib/importer.ts`)
+
+Actualmente, la importación se ejecuta de manera monolítica en memoria:
+1. Recibe los archivos seleccionados por el usuario (`File[]`).
+2. Aplica una comprobación rígida: `files.reduce(...) > 200 MB` provoca error inmediato.
+3. Para archivos ZIP, carga todo el archivo en memoria mediante `new Uint8Array(await zipped[0].arrayBuffer())`.
+4. Invoca `fflate.unzip(bytes, { filter }, callback)` para descomprimir en un objeto `Record<string, Uint8Array>`.
+5. Acumula las entradas extraídas y aplica `JSON.parse(strFromU8(bytes)...)`.
+6. Valida que no falten partes intermedias (`followers_1.json`, `followers_2.json`) y retorna el resultado.
+
+*Limitación conocida:* Este enfoque descarta exportaciones legítimas que pesen más de 200 MB (incluso cuando el contenido relevante sea menor a 1 MB) y duplica el consumo de memoria al cargar el archivo ZIP entero en el heap.
+
+### Arquitectura Objetivo (Fases 2–4, ADR-0004)
+
+La evolución arquitectónica separa el pipeline de importación en cuatro capas desacopladas:
 
 ```
-[Archivo ZIP o JSONs de Instagram]
-              │
-              ▼
-    lib/importer.ts (importFiles)
-      ├─ Validación de tamaño total (≤ 200 MB archivo)
-      ├─ fflate streaming unzip (filtro selectivo: ignora fotos/mensajes)
-      ├─ Verificación de tamaño JSON (≤ 30 MB descompreso / ≤ 1.000 archivos)
-      ├─ Detección de partes secuenciales: followers_1.json, followers_2.json...
-      ├─ Limpieza de BOM UTF-8 y deserialización JSON
-      └─ Extracción con parseRelationships()
-              │
-              ▼
-    Snapshot { id, account, date, importedAt, followers[], following[] }
-              │
-              ├──────────────────────────────────┐
-              ▼                                  ▼
-    Estado en Memoria (app/page.tsx)    Persistencia Opcional (lib/storage.ts)
-              │                                  │
-              ▼                                  ▼
-    lib/relationships.ts (analyze)        IndexedDB: 'followlens-local'
-      ├─ mutuals     = followers ∩ following
-      ├─ notBack     = following \ followers
-      ├─ fans        = followers \ following
-      ├─ lost/new    = diferencias vs snapshot anterior
-      └─ exportación CSV sanitizada
+┌────────────────────────────────────────────────────────────────────────┐
+│                        1. LECTURA DE ENTRADA                          │
+│  Lectura por bloques (File slicing / ReadableStream) del archivo local  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                     2. INSPECCIÓN DE ENTRADAS                          │
+│  Lectura del directorio central / catálogo de entradas del ZIP          │
+│  Identificación de followers_*.json y following.json sin descomprimir   │
+│  Descarte total de fotografías, vídeos, audios y mensajes privados     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│               3. EXTRACCIÓN PROGRESIVA Y CONTROLADA                    │
+│  Descompresión por chunks de las entradas seleccionadas                 │
+│  Límites dinámicos de descompresión por archivo JSON relevante          │
+│  Gestión de memoria acotada y reporte de progreso verificable          │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│               4. ANALIZADORES MODULARES INDEPENDIENTES                 │
+│  [Analizador 1 (Inicial): Seguidores y Seguidos (relationships.ts)]   │
+│  - Limpieza BOM UTF-8 y deserialización segura                          │
+│  - Normalización de usernames (normalize)                               │
+│  - Verificación de partes secuenciales sin saltos                       │
+│  - Cálculo de conjuntos (mutuals, notBack, fans, snapshots)             │
+│  [Futuros Analizadores: Diseñados como módulos independientes]        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
+
+> [!NOTE]
+> Esta separación en capas y procesamiento incremental es el **diseño objetivo**. La implementación real en código se realizará en la Fase 3, previa validación técnica en la Fase 2.
 
 ---
 
 ## 5. CONSTRAINTS — Invariantes Arquitectónicas No Negociables
 
-1. **PROHIBIDO añadir transmisión de datos:** No deben introducirse llamadas `fetch`, `axios`, WebSockets o analítica hacia servidores externos que envíen datos de seguidores o nombres de usuario.
-2. **Exclusión de archivos no relacionados:** El descompresor nunca debe cargar en memoria ni procesar carpetas de fotos, videos o mensajes privados incluidos en el ZIP de Instagram.
-3. **Límites de Seguridad DoS:** Límite máximo de 200 MB por lote de archivos y 30 MB / 1.000 archivos JSON descompresos para proteger el hilo de renderizado del navegador.
-4. **Validación de Partes:** Si un usuario tiene múltiples archivos de seguidores (`followers_1.json`, `followers_3.json`), la importación debe fallar de inmediato si falta alguna parte intermedia.
-5. **Aislamiento Multicuenta:** Nunca comparar ni mezclar snapshots pertenecientes a cuentas distintas (`account`).
+1. **PROHIBIDO añadir transmisión de datos:** No deben introducirse llamadas `fetch`, `axios`, WebSockets o analítica hacia servidores externos que envíen datos de seguidores, identificadores o metadatos de usuario.
+2. **Frontera de Privacidad y Procesamiento en Cliente:** Todo el procesamiento ocurre en el navegador del usuario. Cero backends o microservicios para procesar datos personales.
+3. **Exclusión estricta de archivos no relacionados:** El sistema nunca debe descomprimir ni acumular fotos, vídeos, audios, historias o conversaciones de chat contenidas en el archivo ZIP.
+4. **Criterio de Tamaño de Archivo:** En la arquitectura objetivo (ADR-0004), el tamaño total comprimido de un ZIP legítimo (>200 MB) no es causal de rechazo. Se aplican salvaguardas proporcionales por archivo descompreso y límites de consumo de recursos.
+5. **Validación de Partes Obligatoria:** Si un usuario tiene múltiples archivos de seguidores (`followers_1.json`, `followers_3.json`), la importación debe fallar de inmediato si falta alguna parte intermedia para evitar corromper el análisis de seguidores perdidos.
+6. **Aislamiento Multicuenta:** Nunca comparar ni mezclar snapshots pertenecientes a cuentas distintas (`account`).
 
 ---
 
@@ -98,4 +125,4 @@ lib/
 Cualquier cambio estructural debe validarse mediante:
 - `npm test`: Ejecución de los 14 tests unitarios de `lib/relationships.test.ts`.
 - `npm run typecheck`: Validación estricta de TypeScript (`tsc --noEmit`).
-- `npm run build`: Empaquetado completo de producción con Vite y Vinext.
+- `npm run build`: Empaquetado completo de producción con Vite y Vinext (`vinext build`).

@@ -2,65 +2,63 @@
 okf_version: "0.2"
 type: Architecture
 title: Flujo de Importación y Transformación de Datos
-description: Pipeline detallado de descompresión, sanitización, compatibilidad de esquemas JSON y validaciones.
+description: Pipeline actual vs. pipeline objetivo de importación incremental, compatibilidad de esquemas JSON y validaciones.
 tags:
   - data-flow
   - importer
   - json
   - zip
-  - fflate
-timestamp: "2026-09-07T14:20:00-03:00"
+  - incremental-pipeline
+timestamp: "2026-10-11T02:00:00-03:00"
 lifecycle: stable
 ---
 
 # Flujo de Importación y Transformación de Datos
 
-Este documento describe la secuencia paso a paso implementada en `lib/importer.ts` y `lib/relationships.ts` para procesar archivos de exportación de Instagram.
+Este documento describe la secuencia técnica del procesamiento de exportaciones oficiales de Instagram, comparando el flujo implementado actualmente en el código con el flujo objetivo diseñado bajo el [ADR-0004](decisions/0004-incremental-zip-processing.md).
 
 ---
 
-## 1. Diagrama del Pipeline
+## 1. Flujo Actual (Implementación en `lib/importer.ts`)
 
 ```
 [Usuario selecciona ZIP o JSONs]
                 │
                 ▼
-1. Pre-validación de Archivos
+1. Pre-validación monolítica
    - ¿Array vacío? → Error
-   - ¿Tamaño total > 200 MB? → Error
+   - ¿Tamaño total > 200 MB? → Error (límite rígido actual)
    - ¿Más de un archivo ZIP? → Error
                 │
                 ▼
-2. Extracción / Lectura
-   - CASO ZIP: fflate.unzip con filtro streaming (ignora mensajes/fotos)
+2. Extracción / Lectura en Memoria
+   - CASO ZIP: Lectura completa mediante File.arrayBuffer()
+     * fflate.unzip(bytes, { filter }) filtra por nombre de archivo
      * Límite: ≤ 30 MB descompreso / ≤ 1.000 archivos
-   - CASO JSON: Lectura individual con acumulación y límite de 30 MB
+     * Se acumulan todas las entradas en Record<string, Uint8Array>
+   - CASO JSON: Lectura secuencial en memoria con límite acumulado de 30 MB
                 │
                 ▼
 3. Clasificación y Validación Estructural
-   - fileKind(): Identifica 'followers' o 'following' por nombre de archivo
-   - Detección de duplicados de cuenta (mismo base name en diferentes carpetas)
+   - fileKind(): Identifica 'followers' o 'following'
+   - Detección de colisiones de carpetas (mismo nombre base en diferentes rutas)
    - Extracción de índices de partes: followers_1.json, followers_2.json...
                 │
                 ▼
 4. Deserialización JSON y Limpieza
    - Limpieza de BOM UTF-8 (^\uFEFF)
-   - JSON.parse() con captura de errores sintácticos
+   - JSON.parse() sobre cada búfer extraído
                 │
                 ▼
 5. Normalización de Registros (parseRelationships)
-   - Detección de esquema: Array plano o envuelto en { relationships_* }
-   - Extracción de username prioritario:
-     1) string_list_data[0].value
-     2) row.title
-     3) URL parse de string_list_data[0].href (e.g. instagram.com/_u/{username})
-   - Validación y normalización regex: normalize()
-   - Descarte de duplicados dentro de la misma lista
+   - Detección de formato plano vs. envuelto
+   - Extracción de identificador (string_list_data, title, href)
+   - normalize(): validación de username y descarte de duplicados
                 │
                 ▼
 6. Verificaciones Finales de Integridad
-   - ¿Se encontraron ambas listas (followers y following)? → Obligatorio
-   - ¿Hay saltos en las partes de followers? (e.g. 1, 3 falta 2) → Error
+   - Presencia obligatoria de ambas listas (followers y following)
+   - Verificación de partes continuas (sin saltos 1 → 3)
                 │
                 ▼
 [Retorno de { followers: string[], following: string[], fileCount: number }]
@@ -68,7 +66,61 @@ Este documento describe la secuencia paso a paso implementada en `lib/importer.t
 
 ---
 
-## 2. Compatibilidad con Esquemas de Instagram
+## 2. Flujo Objetivo (Diseño Incremental — Fases 2 a 4)
+
+El nuevo flujo resuelve el cuello de botella de memoria y el límite artificial de 200 MB mediante procesamiento progresivo:
+
+```
+1. Selección del ZIP Oficial
+   - Usuario arrastra o selecciona el archivo descargado de Instagram (sin rechazo por peso total > 200 MB).
+                │
+                ▼
+2. Inspección de Estructura y Metadatos
+   - Lectura de la tabla central de entradas del ZIP sin descomprimir los contenidos.
+   - Detección de cuentas, rutas internas y nombres de archivo.
+                │
+                ▼
+3. Identificación de Entradas Compatibles
+   - Reconocimiento de followers_*.json y following.json según patrones conocidos.
+   - Descarte formal de medios (fotos, vídeos, reels) y mensajes sin cargarlos en memoria.
+                │
+                ▼
+4. Descompresión Progresiva
+   - Extracción incremental (chunked / streaming) de las entradas seleccionadas.
+   - Control de límites de descompresión por archivo JSON individual (protección zip-bomb).
+                │
+                ▼
+5. Validación y Lectura de los JSON Relevantes
+   - Limpieza de BOM UTF-8.
+   - Deserialización segura y eficiente del contenido de cada parte.
+                │
+                ▼
+6. Normalización de Usuarios
+   - Ejecución de normalize() para cada entrada encontrada.
+   - Eliminación de duplicados y descarte de intentos de inyección.
+                │
+                ▼
+7. Validación de la Integridad de las Listas
+   - Comprobación de que no falten partes intermedias en followers_*.json.
+   - Validación de que followers y following pertenezcan a la misma exportación.
+                │
+                ▼
+8. Cálculo de Relaciones
+   - Cálculo de conjuntos (mutuos, no recíprocos, fans) en lib/relationships.ts.
+   - Cálculo diferencial contra snapshot anterior si existe.
+                │
+                ▼
+9. Devolución de Resultados Verificables a la Interfaz
+   - Presentación de métricas y tablas en React.
+   - Opción de persistencia voluntaria en IndexedDB.
+```
+
+> [!IMPORTANT]
+> El flujo objetivo describe la meta de desarrollo para las Fases 2, 3 y 4. No debe asumirse como implementado hasta que el código de `lib/importer.ts` sea modificado y probado formalmente.
+
+---
+
+## 3. Compatibilidad con Esquemas de Instagram
 
 Instagram ha variado la estructura de sus archivos JSON a lo largo de las versiones. FollowLens soporta de forma nativa:
 
@@ -113,8 +165,8 @@ En algunas versiones, `value` está vacío pero el nombre figura en `title` o de
 
 ---
 
-## 3. Manejo de Casos Extremos
+## 4. Manejo de Casos Extremos
 
 - **Listas vacías legítimas:** Cuentas nuevas o sin seguidos (`[]` o `{"relationships_following": []}`) son aceptadas como snapshots válidos de longitud cero.
 - **Registros incompletos:** Si un objeto no contiene ninguna vía válida para identificar al usuario, se lanza una excepción para evitar que una lista parcial falsee las comparaciones de seguidores perdidos.
-- **Partes faltantes:** Si un usuario con muchos seguidores recibe `followers_1.json` y `followers_2.json`, e intenta importar solo `followers_1.json`, FollowLens requiere confirmación expresa de que la lista está completa para evitar falsos positivos de unfollow.
+- **Partes faltantes:** Si un usuario con muchos seguidores recibe `followers_1.json` y `followers_2.json`, e intenta importar solo `followers_1.json`, FollowLens rechaza la importación para evitar falsos positivos de unfollow.
