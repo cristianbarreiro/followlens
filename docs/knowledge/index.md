@@ -44,6 +44,9 @@ lifecycle: stable
 | `change-verification` | [.agents/skills/change-verification/SKILL.md](../../.agents/skills/change-verification/SKILL.md) | Protocolo estricto de verificación y pruebas (`npm test`, `typecheck`, `build`, `lint`) antes de cerrar tareas. |
 | `okf-documentation-sync` | [.agents/skills/okf-documentation-sync/SKILL.md](../../.agents/skills/okf-documentation-sync/SKILL.md) | Procedimiento para mantener sincronizados el código, las directivas de agentes y la base de conocimiento OKF. |
 
+> [!NOTE]
+> **Protocolo de Detección de Skills:** Antigravity IDE auto-descubre las skills en `.agents/skills/` nativamente. En Gemini CLI, Claude Code y GitHub Copilot no existe auto-descubrimiento nativo de esta carpeta; cada herramienta debe guiarse mediante los enlaces explícitos provistos en sus respectivos adaptadores (`GEMINI.md`, `CLAUDE.md`, `.github/copilot-instructions.md`).
+
 ---
 
 ## 🔒 Invariantes Fundamentales del Repositorio

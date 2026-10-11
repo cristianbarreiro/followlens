@@ -5,10 +5,11 @@ FollowLens is a client-side Instagram relationship analyzer built with React 19,
 ## Core Directives
 
 1. **Read Before Acting (Progressive Disclosure):**
-   - Consult [AGENTS.md](AGENTS.md) as the primary operating guide.
-   - Load only relevant technical documents from [docs/knowledge/index.md](docs/knowledge/index.md).
-   - Consult [docs/knowledge/privacy-and-security.md](docs/knowledge/privacy-and-security.md) before touching data handling, imports, or storage.
-   - For import modifications, follow [.github/instructions/importer.instructions.md](.github/instructions/importer.instructions.md) and [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md).
+   - Consult [AGENTS.md](../AGENTS.md) as the primary operating guide.
+   - Load only relevant technical documents from [docs/knowledge/index.md](../docs/knowledge/index.md).
+   - Consult [docs/knowledge/privacy-and-security.md](../docs/knowledge/privacy-and-security.md) before touching data handling, imports, or storage.
+   - For import modifications, follow [instructions/importer.instructions.md](instructions/importer.instructions.md).
+   - Note on Skills: GitHub Copilot does not natively auto-discover `.agents/skills/`; refer directly to specific guides such as [../.agents/skills/instagram-zip-import/SKILL.md](../.agents/skills/instagram-zip-import/SKILL.md) when referenced.
 
 2. **Client-Side Privacy Boundary:**
    - 100% in-browser processing. Never introduce backend services, cloud functions, or remote uploads for user data.
@@ -26,7 +27,7 @@ FollowLens is a client-side Instagram relationship analyzer built with React 19,
      1. `npm test` (all unit tests must pass).
      2. `npm run typecheck` (zero TypeScript errors).
      3. `npm run build` (successful production bundle).
-   - Document any pre-existing linting notes (see [docs/knowledge/development.md](docs/knowledge/development.md)).
+   - Document any pre-existing linting notes (see [docs/knowledge/development.md](../docs/knowledge/development.md)).
 
 5. **Documentation Synchronization:**
-   - When architectural boundaries, data models, or validation rules change, synchronize [docs/knowledge/](docs/knowledge/) and [AGENTS.md](AGENTS.md) following OKF v0.2.
+   - When architectural boundaries, data models, or validation rules change, synchronize [docs/knowledge/](../docs/knowledge/) and [AGENTS.md](../AGENTS.md) following OKF v0.2.

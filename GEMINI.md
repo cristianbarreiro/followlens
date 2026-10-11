@@ -18,6 +18,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
    - ZIP Import & Memory Strategy: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
    - Verification Standards: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
    - OKF Documentation Synchronization: [.agents/skills/okf-documentation-sync/SKILL.md](.agents/skills/okf-documentation-sync/SKILL.md)
+   *(Native auto-discovery in Antigravity IDE via `.agents/skills/`; in Gemini CLI configure explicit skill paths)*
 
 ---
 

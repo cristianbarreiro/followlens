@@ -1,9 +1,5 @@
 ---
-applyTo:
-  - "lib/importer.ts"
-  - "lib/relationships.ts"
-  - "lib/relationships.test.ts"
-  - "components/import-dialog.tsx"
+applyTo: "lib/importer.ts, lib/relationships.ts, lib/relationships.test.ts, components/import-dialog.tsx"
 ---
 
 # Copilot Instruction: Data Import & Relationship Processing
@@ -15,10 +11,10 @@ These specific instructions apply whenever modifying files involved in archive e
 
 ## 1. Mandatory Pre-Flight Reading
 Before modifying any import or parser code:
-1. Review architecture boundaries in [docs/knowledge/architecture.md](docs/knowledge/architecture.md).
-2. Review the data ingestion pipeline in [docs/knowledge/data-flow.md](docs/knowledge/data-flow.md).
-3. Review security and privacy invariants in [docs/knowledge/privacy-and-security.md](docs/knowledge/privacy-and-security.md).
-4. Review [ADR-0004: Incremental ZIP Processing](docs/knowledge/decisions/0004-incremental-zip-processing.md).
+1. Review architecture boundaries in [docs/knowledge/architecture.md](../../docs/knowledge/architecture.md).
+2. Review the data ingestion pipeline in [docs/knowledge/data-flow.md](../../docs/knowledge/data-flow.md).
+3. Review security and privacy invariants in [docs/knowledge/privacy-and-security.md](../../docs/knowledge/privacy-and-security.md).
+4. Review [ADR-0004: Incremental ZIP Processing](../../docs/knowledge/decisions/0004-incremental-zip-processing.md).
 
 ## 2. Ingestion & Extraction Invariants
 - **Scope Boundary:** Only process `followers_*.json` and `following.json` (and legitimate schema variants). Never extract, buffer, or deserialize media (photos, videos, audio, stories) or private direct messages.

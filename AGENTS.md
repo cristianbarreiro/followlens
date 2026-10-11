@@ -32,6 +32,13 @@ Do NOT load all repository files at once. The shared technical knowledge base is
   - Change & Quality Verification: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
   - OKF Documentation Synchronization: [.agents/skills/okf-documentation-sync/SKILL.md](.agents/skills/okf-documentation-sync/SKILL.md)
 
+> [!NOTE]
+> **Tool Discovery Protocol for Skills:**
+> - **Antigravity IDE / Gemini:** Automatically discovers skills under `.agents/skills/` via workspace customizations root `.agents`.
+> - **Gemini CLI:** Does not index `.agents/` automatically; requires explicit skill path or directory configuration.
+> - **Claude Code:** Does not auto-discover `.agents/skills/`; tools and agents must navigate explicitly through links in `CLAUDE.md`.
+> - **GitHub Copilot:** Does not support the `.agents/skills/` standard; relies on `.github/copilot-instructions.md` and `.github/instructions/*.instructions.md` with explicit links.
+
 ---
 
 ## 3. Core Invariants (Do Not Break)
