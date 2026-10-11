@@ -8,7 +8,7 @@
 ## 1. Project Overview
 
 **FollowLens** is a client-side web application built with **React 19**, **TypeScript**, and **Vinext** (Next.js-compatible framework on **Vite 8**).  
-It analyzes Instagram relationships (followers, following, mutuals, unreciprocated, and historical changes) directly from official user data exports (ZIP / JSON) **without credentials, without Instagram API access, and without backend servers for personal data**.
+It analyzes Instagram relationships (followers, following, mutuals, unreciprocated, and historical changes) directly from official user data exports (ZIP / JSON / HTML) **without credentials, without Instagram API access, and without backend servers for personal data**.
 
 ---
 
@@ -47,7 +47,7 @@ Do NOT load all repository files at once. The shared technical knowledge base is
 2. **Zero Telemetry / Zero External Transmission:** Never transmit usernames, follower lists, or exported metadata to third-party endpoints, logging services, or analytics tools.
 3. **No Instagram API / No Credentials:** The application does not ask for, accept, or handle Instagram passwords, cookies, or OAuth tokens.
 4. **Selective Archive Extraction & Scope Boundary:**
-   - The first functional version targets **followers and following relationships exclusively** (`followers_*.json`, `following.json`).
+   - The first functional version targets **followers and following relationships exclusively** (`followers_*.json`, `followers_*.html`, `following.json`, `following.html`).
    - The system inspects archive structure to locate only required entries. It must never extract, buffer, or deserialize media (photos, videos, reels, stories), private direct messages, or unrelated metadata.
    - Accepting a complete official ZIP export does NOT mean extracting all contained files.
    - The total archive size of a legitimate ZIP export (e.g. >200 MB) is not, by itself, a valid reason to reject an import.
@@ -86,7 +86,7 @@ Derived directly from `package.json`:
 | **Install** | `npm install` | Install workspace dependencies. | Requires Node `>=24`. |
 | **Development** | `npm run dev` | Start Vite/Vinext dev server with HMR. | |
 | **Build** | `npm run build` | Compile production client and SSR bundles. | `vinext build` (Vite 8.2.2). |
-| **Testing** | `npm test` | Run 14 unit test suites. | `node --test lib/relationships.test.ts`. |
+| **Testing** | `npm test` | Run 34 unit tests. | `node --test lib/relationships.test.ts`. |
 | **Typecheck** | `npm run typecheck` | Run strict TypeScript validation. | `tsc --noEmit`. |
 | **Formatting** | `npm run format` | Run code formatter via `oxfmt`. | |
 | **Linting** | `npm run lint` | Run linter via `oxlint`. | Pre-existing typeAware lint findings in `components/ui/*` and `node:test` (see [development.md](docs/knowledge/development.md)). |

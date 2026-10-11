@@ -6,34 +6,42 @@ Analizador de relaciones de Instagram. React 19 + TypeScript sobre Vite y Vinext
 
 ## Capacidades
 
-- **Mapeo de Relaciones:** Seguidores, seguidos, mutuos y relaciones no recíprocas (quién no te sigue y a quién no seguís).
-- **Análisis Temporal entre Exportaciones:** Seguidores nuevos/perdidos, seguimientos nuevos/perdidos y cambios en mutuos entre fechas.
-- **Filtros Específicos:** Filtro para seguidores perdidos a quienes todavía seguís.
-- **Exploración y Exportación:** Búsqueda, paginación, timeline por cuenta y exportación a CSV con codificación UTF-8 segura.
-- **Historial Local Opcional:** Persistencia voluntaria en IndexedDB por cuenta, con eliminación individual.
-- **Compatibilidad Amplia:** Soporte para formatos planos o envueltos de Instagram, múltiples archivos (`followers_1.json`, `followers_2.json`, etc.) y normalización de nombres de usuario.
-- **Modo Demostración:** Datos sintéticos interactivos precargados para explorar las funciones sin requerir archivos reales.
+- **Mapeo de Relaciones:** Seguidores, seguidos, mutuos y relaciones no recíprocas (cuentas que no te siguen y cuentas a las que no seguís de vuelta).
+- **Análisis Temporal entre Exportaciones:** Seguidores ganados o perdidos, seguimientos nuevos o descartados y evolución de conexiones mutuas entre snapshots fechados de una misma cuenta.
+- **Filtros Específicos:** Exploración focalizada en no reciprocidad, seguidores perdidos que todavía seguís, mutuos perdidos y nuevas conexiones.
+- **Exploración y Exportación:** Búsqueda interactiva, filtros por grupo, paginación, línea temporal (*timeline*) por cuenta y exportación a CSV con codificación UTF-8 segura (BOM).
+- **Historial Local Opcional:** Persistencia voluntaria en IndexedDB (`followlens-local`) por cuenta, con eliminación granular de snapshots y control total por parte del usuario.
+- **Compatibilidad con Exportaciones Oficiales (HTML y JSON):** Admite exportaciones oficiales de Instagram descargadas tanto en formato **HTML** como en formato **JSON**. Es compatible con el archivo ZIP completo oficial o con la selección conjunta de archivos individuales (`followers_1.html` / `followers_1.json`, partes secuenciales adicionales y `following.html` / `following.json`).
+- **Integridad y Normalización:** Limpieza y normalización rigurosa de nombres de usuario (descarte de scripts, fórmulas de hojas de cálculo y enlaces ajenos), control de secuencia completa en multipartes y verificación de estructura.
+- **Modo Demostración:** Datos sintéticos interactivos precargados para explorar las funciones de la aplicación sin requerir archivos reales.
 
 ---
 
 ## Privacidad y Límites de Seguridad
 
-- **Procesamiento 100% Local:** Los archivos se analizan íntegramente en la memoria del navegador. Ningún dato personal o lista de seguidores se envía a servidores externos.
-- **Filtrado Selectivo de Archivos:** Al importar un ZIP, el descompresor solo extrae los JSON de seguidores y seguidos; fotos, videos, historias y mensajes privados se ignoran y descartan automáticamente.
-- **Sin Analítica:** La aplicación no incluye rastreadores, telemetría ni fuentes externas que capturen datos del usuario.
-- **Persistencia Voluntaria:** El historial se conserva únicamente si el usuario lo solicita explícitamente en IndexedDB (`followlens-local`). Los datos residen en el navegador y desaparecen al limpiar los datos de navegación.
-- **Límites DoS:** Máximo 200 MB por lote de entrada y 30 MB de JSON descompreso (hasta 1.000 archivos).
-- **Modelo Observacional:** Los cambios reflejan observaciones matemáticas entre exportaciones fechadas, no eventos en vivo ni notificaciones instantáneas de unfollow.
+- **Procesamiento 100% Local en Cliente:** Todo el análisis y cálculo matemático ocurren íntegramente en el motor JavaScript del navegador. Ningún dato personal, archivo ni lista de usuarios se envía a servidores externos ni plataformas de telemetría.
+- **Lectura Selectiva por Rangos en ZIP:** Al importar un archivo ZIP completo (incluidas exportaciones oficiales que superen 200 MB por contener fotos, vídeos, historias o audios), el lector inspecciona únicamente el Directorio Central mediante lecturas por rangos (`File.slice()`). Extrae de forma selectiva exclusivamente las entradas relacionales requeridas; fotos, vídeos, historias y mensajes privados nunca se leen ni se descomprimen en memoria.
+- **Límites de Seguridad sobre Datos Relevantes:** El sistema no impone un rechazo arbitrario por el tamaño total comprimido del ZIP, sino salvaguardas estrictas sobre los datos relevantes procesados para prevenir consumos excesivos y ataques DoS:
+  - Máximo 30 MiB por entrada relacional individual y 30 MiB acumulados para archivos relacionales descomprimidos (o en archivos sueltos no comprimidos).
+  - Presupuesto máximo de 16 MiB para el Directorio Central del ZIP.
+  - Límite de hasta 1.000 entradas relacionales analizadas.
+  - Protección activa contra bombas de descompresión (*Zip Bombs*) mediante streaming DEFLATE acotado con detención anticipada y verificación estricta de CRC32 (IEEE 802.3).
+- **Sin Analítica ni Rastreo:** Sin dependencias externas de telemetría, sin cookies de seguimiento, sin integración con la API de Instagram y sin solicitud de credenciales o tokens de sesión.
+- **Persistencia Opcional:** Los datos residen en la memoria volátil de React por defecto. Solo se guardan localmente en el dispositivo si el usuario activa explícitamente la casilla de almacenamiento en IndexedDB.
+- **Modelo Observacional Discreto:** Las diferencias reflejan observaciones matemáticas entre fechas discretas de exportación, no eventos en tiempo real ni notificaciones instantáneas de unfollow.
 
 ---
 
 ## Uso
 
-1. Solicitar la descarga de datos desde Instagram seleccionando formato **JSON** y período **Todo el tiempo**.
-2. Importar el archivo ZIP completo, o seleccionar juntos `followers_1.json` (y todas sus partes) junto con `following.json`.
-3. Indicar el usuario propietario de la cuenta y la fecha de exportación.
-4. *(Opcional)* Activar la casilla para conservar la importación en IndexedDB si se desean realizar comparaciones históricas futuras.
-5. Importar una segunda exportación más reciente de la misma cuenta para visualizar y analizar los cambios.
+1. **Solicitar la descarga de datos en Instagram:** Desde el *Centro de cuentas de Meta > Tu información y permisos > Descargar tu información*, solicitar una exportación seleccionando formato **HTML** o **JSON**, y el intervalo deseado (recomendado: *Todo el tiempo*).
+2. **Seleccionar los archivos en FollowLens:**
+   - **Opción recomendada (ZIP completo):** Seleccionar directamente el archivo `.zip` oficial tal como se descargó de Instagram, sin necesidad de descomprimirlo manualmente ni preocuparse por el tamaño total si contiene medios.
+   - **Opción por archivos individuales:** Si se descomprimió el archivo previamente, seleccionar conjuntamente todos los archivos relacionales de la exportación: `followers_1.html` (y partes consecutivas `followers_2.html`, etc.) junto con `following.html`, o bien `followers_1.json` (y sus partes) junto con `following.json`.
+   > **Nota:** No mezclar archivos de formatos distintos (JSON y HTML) en una misma importación.
+3. **Completar datos de la cuenta:** Indicar el nombre de usuario de la cuenta y la fecha correspondiente a la exportación para identificar el snapshot.
+4. *(Opcional)* **Guardar en historial local:** Activar la casilla para conservar la importación en IndexedDB si se desean realizar comparaciones históricas futuras con nuevas exportaciones.
+5. **Explorar y comparar:** Analizar los grupos de relaciones, filtrar y buscar usuarios o exportar a CSV. Al importar una segunda exportación más reciente de la misma cuenta, la aplicación mostrará automáticamente la evolución y los cambios temporales.
 
 ---
 
@@ -54,15 +62,20 @@ En entornos Windows PowerShell con restricciones de ejecución, usar `npm.cmd` e
 ### Comandos de Validación
 
 ```sh
-# Pruebas unitarias (14 tests con runner nativo de Node.js)
+# Pruebas unitarias (34 tests con runner nativo de Node.js)
 npm test
 
-# Verificación de tipos TypeScript
+# Verificación estricta de tipos TypeScript
 npm run typecheck
 
 # Compilación de producción
 npm run build
 ```
+
+- **Pruebas (`npm test`):** 34 tests unitarios nativos (`node:test`) que validan la suite completa: parsing HTML y JSON, extracción selectiva ZIP, defensas contra bombas de compresión, multipartes y álgebra relacional.
+- **Tipos (`npm run typecheck`):** Validación TypeScript sin errores (`tsc --noEmit`).
+- **Compilación (`npm run build`):** Generación limpia de bundles para producción con Vinext (Vite 8).
+- **Linter (`npm run lint`):** Análisis con `oxlint` (el núcleo del importador en `lib/` cuenta con 0 errores; las advertencias preexistentes se encuentran acotadas a componentes generados de UI y `node:test`, documentadas en [development.md](docs/knowledge/development.md)).
 
 ---
 

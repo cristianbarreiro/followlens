@@ -38,8 +38,8 @@ FollowLens opera bajo el principio no negociable de **cero transmisión de datos
 Cuando un usuario descarga su archivo de Instagram, el archivo ZIP completo suele incluir fotos, historias, vídeos, audios y mensajes directos privados (DMs).
 
 FollowLens implementa **filtrado selectivo estricto**:
-- El sistema inspecciona los nombres de archivo para identificar únicamente `followers_*.json` y `following.json`.
-- **Mensajes privados, fotografías, vídeos, audios y otros JSONs no relacionados nunca deben extraerse, acumularse ni retenerse en memoria.**
+- El sistema inspecciona los nombres de archivo para identificar únicamente los archivos relacionales (`followers_*.json`, `followers_*.html`, `following.json` y `following.html`).
+- **Mensajes privados, fotografías, vídeos, audios y otros archivos no relacionados nunca deben extraerse, acumularse ni retenerse en memoria.**
 - Aceptar el archivo ZIP completo de la exportación significa facilitar la experiencia del usuario sin forzarlo a manipular el archivo externamente; **no significa descomprimir indiscriminadamente todo su contenido**.
 
 ---
