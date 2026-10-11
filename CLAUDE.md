@@ -24,7 +24,7 @@ Operational adapter for Claude Code. FollowLens uses a single source of truth ar
 
 ## ⚡ Fast Command Reference
 
-- `npm test`: Run 14 unit test suites (`node --test lib/relationships.test.ts`).
+- `npm test`: Run 34 unit tests (`node --test lib/relationships.test.ts`).
 - `npm run typecheck`: Strict TypeScript check (`tsc --noEmit`).
 - `npm run build`: Production compilation (`vinext build`).
 - `npm run dev`: Development server (`vinext dev`).
@@ -35,7 +35,7 @@ Operational adapter for Claude Code. FollowLens uses a single source of truth ar
 
 - **100% Client-Side:** No backend uploads, no external APIs, no cloud functions for user data.
 - **Zero Telemetry:** Never add network calls transmitting personal data, follower lists, or metadata.
-- **Selective Extraction & Scope Boundary:** Initial analyzer is limited to followers and following relationships (`followers_*.json`, `following.json`). Never extract or buffer photos, videos, stories, or DMs. Full legitimate archive size (>200 MB) is not a rejection reason in target architecture; note current in-memory limit (200 MB) in `lib/importer.ts` as pending migration to incremental processing.
+- **Selective Extraction & Scope Boundary:** Current functional scope targets followers and following relationships (`followers_*.json`, `followers_*.html`, `following.json`, `following.html`). Never extract or buffer photos, videos, stories, or DMs. Full legitimate archive size (>200 MB) is not a rejection reason in target architecture; note current in-memory limit (200 MB) in `lib/importer.ts` as pending migration to incremental processing.
 - **Opt-in Storage:** IndexedDB storage (`followlens-local`) requires explicit user consent.
 - **Account Isolation:** Snapshots from different accounts (`account`) must never be mixed or compared.
 - **License Compliance:** FollowLens is licensed under **PolyForm Noncommercial 1.0.0** (source-available, noncommercial).

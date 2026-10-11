@@ -56,8 +56,8 @@ lifecycle: stable
 ## 🔒 Invariantes Fundamentales del Repositorio
 
 1. **Cero Transmisión de Datos Personales:** No existen endpoints backend receptores ni APIs remotas para los archivos importados. Todo el parsing ocurre localmente en el motor JS del navegador.
-2. **Sin Scraping ni API de Instagram:** La aplicación opera exclusivamente sobre exportaciones oficiales descargadas por el usuario en formato JSON.
+2. **Sin Scraping ni API de Instagram:** La aplicación opera exclusivamente sobre exportaciones oficiales descargadas por el usuario en formato JSON o HTML.
 3. **Persistencia Estrictamente Local y Opcional:** Los datos viven en memoria por defecto; el usuario decide si persistirlos en IndexedDB (`followlens-local`).
 4. **Aislamiento Multicuenta:** Cada snapshot pertenece a una cuenta (`account`). Las comparaciones cronológicas entre cuentas distintas están bloqueadas a nivel de motor.
 5. **Observación Discreta vs. Tiempo Real:** Los cambios reflejan diferencias matemáticas entre fechas de exportación, no marcas de tiempo en vivo de unfollow.
-6. **Extracción Selectiva y Alcance Acotado:** La primera versión funcional analiza exclusivamente relaciones de seguidores y seguidos (`followers_*.json`, `following.json`). Nunca se extraen ni procesan fotos, vídeos ni mensajes. El tamaño total del ZIP legítimo (>200 MB) no es motivo de rechazo en la arquitectura objetivo (ADR-0004).
+6. **Extracción Selectiva y Alcance Acotado:** La primera versión funcional analiza exclusivamente relaciones de seguidores y seguidos (`followers_*.json`, `followers_*.html`, `following.json`, `following.html`). Nunca se extraen ni procesan fotos, vídeos ni mensajes. El tamaño total del ZIP legítimo (>200 MB) no es motivo de rechazo en la arquitectura objetivo (ADR-0004).
