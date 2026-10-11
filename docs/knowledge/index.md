@@ -45,7 +45,11 @@ lifecycle: stable
 | `okf-documentation-sync` | [.agents/skills/okf-documentation-sync/SKILL.md](../../.agents/skills/okf-documentation-sync/SKILL.md) | Procedimiento para mantener sincronizados el código, las directivas de agentes y la base de conocimiento OKF. |
 
 > [!NOTE]
-> **Protocolo de Detección de Skills:** Antigravity IDE auto-descubre las skills en `.agents/skills/` nativamente. En Gemini CLI, Claude Code y GitHub Copilot no existe auto-descubrimiento nativo de esta carpeta; cada herramienta debe guiarse mediante los enlaces explícitos provistos en sus respectivos adaptadores (`GEMINI.md`, `CLAUDE.md`, `.github/copilot-instructions.md`).
+> **Protocolo de Detección de Skills:**
+> - **Estándar:** Todas las skills bajo `.agents/skills/` siguen el formato abierto de Agent Skills (`SKILL.md` con metadatos YAML).
+> - **Antigravity IDE & Gemini CLI:** Reconocen nativamente `.agents/skills/` (en Gemini CLI, `.agents/skills` es un alias estándar de `.gemini/skills`) con descubrimiento progresivo.
+> - **GitHub Copilot:** En entornos con soporte de Agent Skills (como Copilot Agent Mode), `.agents/skills/` se descubre automáticamente junto a `.github/skills/`. En modos clásicos de autocompletado o chat, Copilot se guía mediante `.github/copilot-instructions.md`.
+> - **Claude Code:** Compatible con Agent Skills; admite descubrimiento en directorios estándar o acceso directo mediante los enlaces en `CLAUDE.md`.
 
 ---
 

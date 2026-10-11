@@ -9,7 +9,7 @@ FollowLens is a client-side Instagram relationship analyzer built with React 19,
    - Load only relevant technical documents from [docs/knowledge/index.md](../docs/knowledge/index.md).
    - Consult [docs/knowledge/privacy-and-security.md](../docs/knowledge/privacy-and-security.md) before touching data handling, imports, or storage.
    - For import modifications, follow [instructions/importer.instructions.md](instructions/importer.instructions.md).
-   - Note on Skills: GitHub Copilot does not natively auto-discover `.agents/skills/`; refer directly to specific guides such as [../.agents/skills/instagram-zip-import/SKILL.md](../.agents/skills/instagram-zip-import/SKILL.md) when referenced.
+   - Note on Skills: In Agent mode, GitHub Copilot automatically discovers skills located in [../.agents/skills/](../.agents/skills/). In standard chat or code completion modes, consult guides via direct links such as [../.agents/skills/instagram-zip-import/SKILL.md](../.agents/skills/instagram-zip-import/SKILL.md).
 
 2. **Client-Side Privacy Boundary:**
    - 100% in-browser processing. Never introduce backend services, cloud functions, or remote uploads for user data.

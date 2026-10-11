@@ -34,10 +34,10 @@ Do NOT load all repository files at once. The shared technical knowledge base is
 
 > [!NOTE]
 > **Tool Discovery Protocol for Skills:**
-> - **Antigravity IDE / Gemini:** Automatically discovers skills under `.agents/skills/` via workspace customizations root `.agents`.
-> - **Gemini CLI:** Does not index `.agents/` automatically; requires explicit skill path or directory configuration.
-> - **Claude Code:** Does not auto-discover `.agents/skills/`; tools and agents must navigate explicitly through links in `CLAUDE.md`.
-> - **GitHub Copilot:** Does not support the `.agents/skills/` standard; relies on `.github/copilot-instructions.md` and `.github/instructions/*.instructions.md` with explicit links.
+> - **Specification & Format:** All repository skills located under `.agents/skills/` follow the open Agent Skills specification (`SKILL.md` with YAML frontmatter `name` and `description`).
+> - **Antigravity IDE & Gemini CLI:** Natively recognize `.agents/skills/` (in Gemini CLI, `.agents/skills` is an officially recognized standard alias alongside `.gemini/skills/`) with progressive discovery and activation based on task descriptions.
+> - **GitHub Copilot:** In environments with Agent Skills support (such as Copilot Agent Mode), `.agents/skills/` is automatically discovered alongside `.github/skills/` and `.claude/skills/`. In standard completion or classic chat modes, Copilot relies on instructions in `.github/copilot-instructions.md` and `.github/instructions/*.instructions.md`.
+> - **Claude Code:** Supports the Agent Skills standard; tools and agents can discover skills in standard locations (`.agents/skills/`, `.claude/skills/`) or navigate through explicit references in `CLAUDE.md`.
 
 ---
 

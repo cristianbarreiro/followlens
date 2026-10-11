@@ -62,12 +62,16 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 > [!NOTE]
 > **Datos de prueba:** Todos los tests operan sobre datos sintéticos generados en memoria con `zipSync` y `new File()`. No se leen ni requieren archivos reales del disco.
 
-### Pruebas Pendientes para la Evolución Incremental (Fases 2–4):
-Cuando se implemente el nuevo importador, deberán añadirse pruebas específicas para:
-- Archivos ZIP que contengan archivos de gran tamaño no relacionados (simulando fotos/vídeos sin cargarlos en memoria).
-- Descompresión progresiva por chunks y verificación de liberación de memoria.
-- Comportamiento ante interrupción o cancelación de lectura.
-- Ausencia de rechazo arbitrario para archivos superiores a 200 MB.
+### Pruebas Pendientes para la Evolución Incremental (Fase 3 y 4):
+Para la implementación del lector selectivo (Fase 3), se incorporará una batería de pruebas sintéticas en `lib/relationships.test.ts` que cubra:
+1. **Búsqueda y validación de EOCD:** Coincidencia exacta de fin de archivo con comentario cero y con comentario de tamaño variable (hasta 65.535 bytes); rechazo seguro de archivos sin firma EOCD o truncados.
+2. **Métodos de compresión y cifrado:** Descompresión correcta de entradas STORE (método 0) y DEFLATE (método 8); rechazo con error explicativo para métodos no soportados o entradas cifradas (bit 0 activo).
+3. **Detección y rechazo seguro de ZIP64:** Detección de marcadores `0xFFFF` / `0xFFFFFFFF` o locator `0x07064b50` y rechazo controlado con mensaje informativo, sin interpretar erróneamente campos de 32 bits.
+4. **Validación de límites y offsets:** Rechazo preventivo ante offsets calculados que apunten fuera de los límites físicos del archivo (`out of bounds`).
+5. **Omisión real de multimedia no deseada:** ZIP sintético con archivos ficticios de vídeo/fotos junto con `followers_1.json` y `following.json`, comprobando que los datos de medios nunca se lean ni se descompriman.
+6. **Representación sintética de archivo >200 MB:** Prueba que verifique la ausencia de rechazo artificial por tamaño de archivo **sin requerir instanciar un buffer real de cientos de megabytes en la memoria del test runner** (mediante simulación liviana de objeto `File`/`Blob`).
+7. **Integridad de partes y aislamiento:** Múltiples partes secuenciales de seguidores, detección de saltos (1 → 3), colisión de cuentas en carpetas internas y compatibilidad con JSONs sueltos.
+8. **Validación manual en navegador (Fase 4):** La verificación con la exportación real de ~232 MB se reservará para ensayos de rendimiento y consumo de memoria en navegador (Chrome/Firefox DevTools).
 
 *(No declarar que existen pruebas de navegador o E2E hasta que hayan sido implementadas en el repositorio).*
 

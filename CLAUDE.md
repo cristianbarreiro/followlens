@@ -18,7 +18,7 @@ Operational adapter for Claude Code. FollowLens uses a single source of truth ar
    - ZIP Import & Memory Strategy: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
    - Verification Standards: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
    - OKF Documentation Synchronization: [.agents/skills/okf-documentation-sync/SKILL.md](.agents/skills/okf-documentation-sync/SKILL.md)
-   *(Claude Code does not auto-discover `.agents/skills/`; consult them via direct reference above)*
+   *(Compatible with Agent Skills; discoverable in supporting environments or accessed via direct references above)*
 
 ---
 
