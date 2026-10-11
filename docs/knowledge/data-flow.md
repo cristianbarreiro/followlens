@@ -1,5 +1,5 @@
 ---
-okf_version: "0.2"
+okf_version: '0.2'
 type: Architecture
 title: Flujo de Importación y Transformación de Datos
 description: Pipeline actual vs. pipeline objetivo de importación incremental, compatibilidad de esquemas JSON y validaciones.
@@ -9,7 +9,7 @@ tags:
   - json
   - zip
   - incremental-pipeline
-timestamp: "2026-10-11T02:00:00-03:00"
+timestamp: '2026-10-11T02:00:00-03:00'
 lifecycle: stable
 ---
 
@@ -22,7 +22,7 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
 ## 1. Flujo Implementado (`lib/zip.ts` y `lib/importer.ts`)
 
 ```
-[Usuario selecciona ZIP o JSONs]
+[Usuario selecciona ZIP, JSONs o HTMLs]
                 │
                 ▼
 1. Pre-validación
@@ -41,29 +41,31 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
      * Validación de cabeceras locales (LFH), offsets y descriptor de datos (bit 3)
      * Descompresión STORE / streaming DEFLATE acotada (≤ 30 MB por entrada y total)
      * Verificación estricta de CRC32 (IEEE 802.3) y longitud real descomprimida
-   - CASO JSON: Lectura secuencial en memoria con límite acumulado de 30 MB
+   - CASO ARCHIVOS SUELTOS: Lectura secuencial en memoria con límite acumulado de 30 MB
                 │
                 ▼
 3. Clasificación y Validación Estructural
-   - fileKind(): Identifica 'followers' o 'following'
+   - fileInfo(): Identifica 'followers'/'following' y formato 'json'/'html'
+   - Rechazo de formatos mezclados (no mezclar JSON y HTML en una misma exportación)
    - Detección de colisiones de carpetas (mismo nombre base en diferentes rutas)
-   - Extracción de índices de partes: followers_1.json, followers_2.json...
+   - Extracción de índices de partes: followers_1, followers_2...
                 │
                 ▼
-4. Deserialización JSON y Limpieza
-   - Limpieza de BOM UTF-8 (^\uFEFF)
-   - JSON.parse() sobre cada búfer extraído
+4. Parsing según Formato de Entrada
+   - RAMA JSON: Limpieza BOM UTF-8 y JSON.parse()
+     * parseRelationships(): Formato plano vs. envuelto, title/href
+   - RAMA HTML: Decodificación de texto y DOMParser
+     * parseHtmlRelationships(): Extracción desde enlaces de perfil /_u/, entidades, h2
                 │
                 ▼
-5. Normalización de Registros (parseRelationships)
-   - Detección de formato plano vs. envuelto
-   - Extracción de identificador (string_list_data, title, href)
-   - normalize(): validación de username y descarte de duplicados
+5. Normalización y Deduplicación
+   - normalize(): validación estricta de username (1..30 caracteres, a-z0-9._)
+   - Descarte de duplicados por Set
                 │
                 ▼
 6. Verificaciones Finales de Integridad
    - Presencia obligatoria de ambas listas (followers y following)
-   - Verificación de partes continuas (sin saltos 1 → 3)
+   - Verificación de partes continuas de followers (sin saltos 1 → 3)
                 │
                 ▼
 [Retorno de { followers: string[], following: string[], fileCount: number }]
@@ -130,7 +132,9 @@ El nuevo flujo resuelve el cuello de botella de memoria y el límite artificial 
 Instagram ha variado la estructura de sus archivos JSON a lo largo de las versiones. FollowLens soporta de forma nativa:
 
 ### Formato Plano (Array directo)
+
 Común en `followers_*.json`:
+
 ```json
 [
   {
@@ -147,7 +151,9 @@ Común en `followers_*.json`:
 ```
 
 ### Formato Envuelto (Objeto raíz con clave)
+
 Común en `following.json`:
+
 ```json
 {
   "relationships_following": [
@@ -166,6 +172,7 @@ Común en `following.json`:
 ```
 
 ### Cuentas sin `value` explícito
+
 En algunas versiones, `value` está vacío pero el nombre figura en `title` o dentro de la URL `href` (`instagram.com/_u/{usuario}`). El parser extrae y normaliza el identificador de forma segura en cualquiera de estas variantes.
 
 ---

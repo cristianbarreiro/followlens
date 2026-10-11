@@ -36,11 +36,27 @@ export function normalize(value: unknown): string | null {
   const name = value.trim().replace(/^@/, '').toLowerCase();
   return /^[a-z0-9._]{1,30}$/.test(name) ? name : null;
 }
-export function fileKind(path: string): 'followers' | 'following' | null {
+export type FileFormat = 'json' | 'html';
+export type FileKind = 'followers' | 'following';
+
+export function fileInfo(
+  path: string,
+): { kind: FileKind; format: FileFormat } | null {
   const name = path.replaceAll('\\', '/').split('/').pop()?.toLowerCase() ?? '';
-  if (/^followers(?:_\d+)?\.json$/.test(name)) return 'followers';
-  if (/^following(?:_\d+)?\.json$/.test(name)) return 'following';
-  return null;
+  const match = /^(followers(?:_\d+)?|following(?:_\d+)?)\.(json|html)$/.exec(
+    name,
+  );
+  if (!match) return null;
+  const basePrefix = match[1];
+  const ext = match[2] as FileFormat;
+  const kind: FileKind = basePrefix.startsWith('followers')
+    ? 'followers'
+    : 'following';
+  return { kind, format: ext };
+}
+
+export function fileKind(path: string): FileKind | null {
+  return fileInfo(path)?.kind ?? null;
 }
 export function parseRelationships(
   data: unknown,

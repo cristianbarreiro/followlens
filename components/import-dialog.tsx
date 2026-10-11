@@ -125,12 +125,12 @@ export function ImportDialog({
             <strong>
               {files.length
                 ? `${files.length} archivo${files.length === 1 ? '' : 's'} seleccionado${files.length === 1 ? '' : 's'}`
-                : 'Arrastrá tu ZIP o tus JSON'}
+                : 'Arrastrá tu ZIP, tus JSON o tus HTML'}
             </strong>
             <p>
               {files.length
                 ? files.map((f) => f.name).join(', ')
-                : 'Exportación ZIP completa (analizamos seguidores y seguidos) · JSON individuales hasta 30 MB'}
+                : 'Exportación ZIP completa (JSON o HTML de seguidores y seguidos) · Archivos individuales hasta 30 MB'}
             </p>
             <button
               type="button"
@@ -143,7 +143,7 @@ export function ImportDialog({
             <input
               ref={input}
               type="file"
-              accept=".zip,.json"
+              accept=".zip,.json,.html"
               multiple
               className="sr-only"
               aria-label="Archivos de Instagram"

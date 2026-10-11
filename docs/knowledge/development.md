@@ -1,5 +1,5 @@
 ---
-okf_version: "0.2"
+okf_version: '0.2'
 type: Development Guide
 title: Guía de Desarrollo y Validación
 description: Requisitos del entorno, herramientas, scripts de compilación, suite de pruebas, estado de linter y flujo de trabajo.
@@ -10,7 +10,7 @@ tags:
   - vinext
   - oxlint
   - verification
-timestamp: "2026-10-11T02:00:00-03:00"
+timestamp: '2026-10-11T02:00:00-03:00'
 lifecycle: stable
 ---
 
@@ -27,15 +27,15 @@ lifecycle: stable
 
 Todos los comandos se ejecutan desde la raíz del proyecto:
 
-| Comando | Acción | Herramienta | Notas |
-|---|---|---|---|
-| `npm run dev` | Inicia el servidor de desarrollo local con HMR. | `vinext dev` | Entorno Vite 8 con Vinext. |
-| `npm run build` | Compila la aplicación completa para producción. | `vinext build` | Compila bundles cliente y SSR. |
-| `npm test` | Ejecuta la suite completa de pruebas unitarias. | `node --test lib/relationships.test.ts` | 14 tests unitarios nativos. |
-| `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos. | `tsc --noEmit` | Validación estricta con TypeScript 5.9. |
-| `npm run format` | Formatea el código fuente del proyecto. | `oxfmt` | Formateador ultrarrápido basado en Rust. |
-| `npm run lint` | Ejecuta el análisis estático de código. | `oxlint` | Véase Sección 4 para diagnóstico de linter. |
-| `npm run start` | Arranca el runtime local de Cloudflare Worker / Wrangler. | `wrangler dev --config dist/server/wrangler.json` | Emulación local. |
+| Comando             | Acción                                                    | Herramienta                                       | Notas                                       |
+| ------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
+| `npm run dev`       | Inicia el servidor de desarrollo local con HMR.           | `vinext dev`                                      | Entorno Vite 8 con Vinext.                  |
+| `npm run build`     | Compila la aplicación completa para producción.           | `vinext build`                                    | Compila bundles cliente y SSR.              |
+| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 14 tests unitarios nativos.                 |
+| `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.     |
+| `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.    |
+| `npm run lint`      | Ejecuta el análisis estático de código.                   | `oxlint`                                          | Véase Sección 4 para diagnóstico de linter. |
+| `npm run start`     | Arranca el runtime local de Cloudflare Worker / Wrangler. | `wrangler dev --config dist/server/wrangler.json` | Emulación local.                            |
 
 ---
 
@@ -43,7 +43,8 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 
 La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
 
-### Cobertura Actual Comprobada (23 tests activos):
+### Cobertura Actual Comprobada (31 tests activos):
+
 1. Normalización de usernames (descarte de fórmulas de planilla `@`, `=`, `<script>`).
 2. Parsing de formatos planos, envueltos y resolución por `title` / URL.
 3. Rechazo de registros incompletos y soporte de listas vacías legítimas.
@@ -67,9 +68,17 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 21. Detención temprana de descompresión ante bombas ZIP altamente comprimibles (protección DoS).
 22. Omisión comprobada de multimedia, verificando que los rangos binarios nunca se solicitan con `slice()`.
 23. Admisión de archivo ZIP simulado superior a 200 MB mediante rangos selectivos sin buffer real masivo.
+24. Importación de ZIP con listas HTML válidas de seguidores y seguidos, y análisis de relaciones.
+25. Soporte de multipartes HTML de seguidores y detección de saltos secuenciales.
+26. Extracción HTML desde rutas `/_u/`, decodificación de entidades, encabezados `<h2>` y descarte de enlaces ajenos.
+27. Rechazo controlado de HTML vacío, malformado o sin estructura reconocible de Instagram.
+28. Omisión comprobada de archivos HTML no relacionales dentro del ZIP (`start_here.html`, `chats.html`).
+29. Rechazo controlado de importación con formatos mezclados JSON y HTML.
+30. Admisión de archivos HTML sueltos sin archivo ZIP.
+31. Admisión de lista HTML de seguidores legítimamente vacía.
 
 > [!NOTE]
-> **Datos de prueba y validación:** Las 23 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la Fase 4 se validó además el comportamiento con una exportación real de Instagram de ~232 MB (243 MB, 819 entradas), comprobando la lectura selectiva sin sobrecarga de memoria, la omisión de multimedia y la emisión controlada de errores ante formatos no soportados.
+> **Datos de prueba y validación:** Las 31 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la Fase 5 se validó de extremo a extremo la importación con la exportación real de Instagram de ~232 MB (243 MB, 819 entradas) conteniendo `followers_1.html` y `following.html`, procesando el análisis completo en 224 ms con solo 282 KB leídos del disco y 2 MB de memoria heap.
 
 ---
 
@@ -85,6 +94,7 @@ La suite actual de pruebas se ejecuta mediante el runner nativo de Node.js (`nod
 ## 5. Flujo Obligatorio de Verificación (Definition of Done)
 
 Antes de finalizar cualquier tarea de desarrollo o mantenimiento, ejecutar:
+
 ```sh
 # 1. Pruebas unitarias obligatorias (100% éxito)
 npm test

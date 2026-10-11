@@ -16,7 +16,7 @@ const CRC32_TABLE = new Uint32Array(256);
 for (let i = 0; i < 256; i++) {
   let c = i;
   for (let k = 0; k < 8; k++) {
-    c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
   }
   CRC32_TABLE[i] = c >>> 0;
 }
@@ -32,7 +32,10 @@ export function crc32(bytes: Uint8Array): number {
 export interface ZipSource {
   name?: string;
   size: number;
-  slice(start: number, end: number): Blob | { arrayBuffer(): Promise<ArrayBuffer> };
+  slice(
+    start: number,
+    end: number,
+  ): Blob | { arrayBuffer(): Promise<ArrayBuffer> };
 }
 
 export interface CentralDirectoryEntry {
@@ -60,7 +63,9 @@ export function decompressDeflate(
   const inflator = new Inflate((chunk) => {
     totalDecompressed += chunk.length;
     if (totalDecompressed > maxOutputBytes) {
-      abortError = new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
+      abortError = new Error(
+        'Los JSON superan el límite de 30 MB o 1.000 archivos.',
+      );
       throw abortError;
     }
     chunks.push(chunk);
@@ -72,7 +77,10 @@ export function decompressDeflate(
       inflator.push(new Uint8Array(0), true);
     } else {
       for (let i = 0; i < compressed.length; i += CHUNK_SIZE) {
-        const slice = compressed.subarray(i, Math.min(i + CHUNK_SIZE, compressed.length));
+        const slice = compressed.subarray(
+          i,
+          Math.min(i + CHUNK_SIZE, compressed.length),
+        );
         const isFinal = i + CHUNK_SIZE >= compressed.length;
         inflator.push(slice, isFinal);
       }
@@ -107,7 +115,9 @@ export async function readZipSelective(
   // 1. Localizar el registro EOCD en los últimos 65.557 bytes (22 fijo + 65.535 comentario máx)
   const searchLength = Math.min(source.size, 65557);
   const searchStart = source.size - searchLength;
-  const searchBuffer = await source.slice(searchStart, source.size).arrayBuffer();
+  const searchBuffer = await source
+    .slice(searchStart, source.size)
+    .arrayBuffer();
   const searchView = new DataView(searchBuffer);
 
   let eocdRel = -1;
@@ -142,7 +152,9 @@ export async function readZipSelective(
     if (eocdRel >= 20) {
       locatorBuf = searchBuffer.slice(eocdRel - 20, eocdRel);
     } else {
-      locatorBuf = await source.slice(eocdFileOffset - 20, eocdFileOffset).arrayBuffer();
+      locatorBuf = await source
+        .slice(eocdFileOffset - 20, eocdFileOffset)
+        .arrayBuffer();
     }
     const locView = new DataView(locatorBuf);
     if (locView.getUint32(0, true) === ZIP64_LOCATOR_SIGNATURE) {
@@ -171,15 +183,21 @@ export async function readZipSelective(
   }
 
   if (cdOffset < 0 || cdSize < 0 || cdOffset + cdSize > eocdFileOffset) {
-    throw new Error('Directorio central corrupto o fuera de los límites del archivo.');
+    throw new Error(
+      'Directorio central corrupto o fuera de los límites del archivo.',
+    );
   }
 
   if (cdSize > MAX_CENTRAL_DIR_SIZE) {
-    throw new Error('El directorio central del ZIP supera el presupuesto de seguridad (16 MB).');
+    throw new Error(
+      'El directorio central del ZIP supera el presupuesto de seguridad (16 MB).',
+    );
   }
 
   // 4. Lectura e inspección del Directorio Central
-  const cdBuffer = await source.slice(cdOffset, cdOffset + cdSize).arrayBuffer();
+  const cdBuffer = await source
+    .slice(cdOffset, cdOffset + cdSize)
+    .arrayBuffer();
   const cdView = new DataView(cdBuffer);
   let cursor = 0;
   let parsedCount = 0;
@@ -225,7 +243,9 @@ export async function readZipSelective(
   }
 
   if (parsedCount !== totalEntries) {
-    throw new Error('Directorio central corrupto: cantidad de entradas no coincide.');
+    throw new Error(
+      'Directorio central corrupto: cantidad de entradas no coincide.',
+    );
   }
 
   // 5. Filtrado de entradas relevantes y validaciones de seguridad
@@ -237,9 +257,15 @@ export async function readZipSelective(
 
   const basenames = new Set<string>();
   for (const entry of relevant) {
-    const base = entry.name.replaceAll('\\', '/').split('/').pop()!.toLowerCase();
+    const base = entry.name
+      .replaceAll('\\', '/')
+      .split('/')
+      .pop()!
+      .toLowerCase();
     if (basenames.has(base)) {
-      throw new Error('Hay varias carpetas de seguidores. Importá los JSON de una sola cuenta.');
+      throw new Error(
+        'Hay varias carpetas de seguidores. Importá los datos de una sola cuenta.',
+      );
     }
     basenames.add(base);
   }
@@ -247,12 +273,18 @@ export async function readZipSelective(
   let declaredTotal = 0;
   let declaredCompressedTotal = 0;
   for (const entry of relevant) {
-    if (entry.uncompressedSize > MAX_JSON_ENTRY || entry.compressedSize > MAX_JSON_ENTRY) {
+    if (
+      entry.uncompressedSize > MAX_JSON_ENTRY ||
+      entry.compressedSize > MAX_JSON_ENTRY
+    ) {
       throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
     }
     declaredTotal += entry.uncompressedSize;
     declaredCompressedTotal += entry.compressedSize;
-    if (declaredTotal > MAX_JSON_TOTAL || declaredCompressedTotal > MAX_COMPRESSED_TOTAL) {
+    if (
+      declaredTotal > MAX_JSON_TOTAL ||
+      declaredCompressedTotal > MAX_COMPRESSED_TOTAL
+    ) {
       throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
     }
   }
@@ -263,18 +295,30 @@ export async function readZipSelective(
   let cumulativeCompressedRead = 0;
 
   for (const entry of relevant) {
-    const entryBase = entry.name.replaceAll('\\', '/').split('/').pop()!.toLowerCase();
+    const entryBase = entry.name
+      .replaceAll('\\', '/')
+      .split('/')
+      .pop()!
+      .toLowerCase();
 
     cumulativeCompressedRead += entry.compressedSize;
     if (cumulativeCompressedRead > MAX_COMPRESSED_TOTAL) {
       throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
     }
 
-    if (entry.localOffset < 0 || entry.localOffset + 30 > source.size || entry.localOffset + 30 > cdOffset) {
-      throw new Error('Offset de encabezado local fuera de los límites del archivo.');
+    if (
+      entry.localOffset < 0 ||
+      entry.localOffset + 30 > source.size ||
+      entry.localOffset + 30 > cdOffset
+    ) {
+      throw new Error(
+        'Offset de encabezado local fuera de los límites del archivo.',
+      );
     }
 
-    const lfhBuffer = await source.slice(entry.localOffset, entry.localOffset + 30).arrayBuffer();
+    const lfhBuffer = await source
+      .slice(entry.localOffset, entry.localOffset + 30)
+      .arrayBuffer();
     const lfhView = new DataView(lfhBuffer);
     if (lfhView.getUint32(0, true) !== LOCAL_HEADER_SIGNATURE) {
       throw new Error('Firma de encabezado local inválida.');
@@ -286,7 +330,9 @@ export async function readZipSelective(
     const lfhExtraLen = lfhView.getUint16(28, true);
 
     if ((entry.flag & 0x0001) !== 0 || (lfhFlag & 0x0001) !== 0) {
-      throw new Error('El archivo ZIP contiene entradas protegidas por contraseña no soportadas.');
+      throw new Error(
+        'El archivo ZIP contiene entradas protegidas por contraseña no soportadas.',
+      );
     }
 
     if (entry.method !== 0 && entry.method !== 8) {
@@ -294,14 +340,18 @@ export async function readZipSelective(
     }
 
     if (lfhMethod !== entry.method) {
-      throw new Error('Inconsistencia en método de compresión entre encabezado local y directorio central.');
+      throw new Error(
+        'Inconsistencia en método de compresión entre encabezado local y directorio central.',
+      );
     }
 
     // Bit 3: descriptor de datos posterior. Validar coherencia entre CD y LFH.
     const cdBit3 = (entry.flag & 0x0008) !== 0;
     const lfhBit3 = (lfhFlag & 0x0008) !== 0;
     if (cdBit3 !== lfhBit3) {
-      throw new Error('Inconsistencia en banderas (bit 3) entre encabezado local y directorio central.');
+      throw new Error(
+        'Inconsistencia en banderas (bit 3) entre encabezado local y directorio central.',
+      );
     }
 
     if (!cdBit3) {
@@ -313,24 +363,33 @@ export async function readZipSelective(
         lfhComp !== entry.compressedSize ||
         lfhUncomp !== entry.uncompressedSize
       ) {
-        throw new Error('Inconsistencia de integridad entre encabezado local y directorio central.');
+        throw new Error(
+          'Inconsistencia de integridad entre encabezado local y directorio central.',
+        );
       }
     }
 
     const lfhTotalHeader = 30 + lfhFnLen + lfhExtraLen;
-    if (entry.localOffset + lfhTotalHeader > source.size || entry.localOffset + lfhTotalHeader > cdOffset) {
+    if (
+      entry.localOffset + lfhTotalHeader > source.size ||
+      entry.localOffset + lfhTotalHeader > cdOffset
+    ) {
       throw new Error('Encabezado local fuera de los límites del archivo.');
     }
 
     const lfhNameBuf =
       lfhFnLen > 0
-        ? await source.slice(entry.localOffset + 30, entry.localOffset + 30 + lfhFnLen).arrayBuffer()
+        ? await source
+            .slice(entry.localOffset + 30, entry.localOffset + 30 + lfhFnLen)
+            .arrayBuffer()
         : new ArrayBuffer(0);
     const lfhName = new TextDecoder('utf-8').decode(new Uint8Array(lfhNameBuf));
     const normLfhName = lfhName.replaceAll('\\', '/').toLowerCase();
     const normEntryName = entry.name.replaceAll('\\', '/').toLowerCase();
     if (normLfhName !== normEntryName) {
-      throw new Error('Inconsistencia de nombre de archivo entre encabezado local y directorio central.');
+      throw new Error(
+        'Inconsistencia de nombre de archivo entre encabezado local y directorio central.',
+      );
     }
 
     const dataOffset = entry.localOffset + lfhTotalHeader;
@@ -343,7 +402,9 @@ export async function readZipSelective(
       );
     }
 
-    const dataBuffer = await source.slice(dataOffset, dataOffset + entry.compressedSize).arrayBuffer();
+    const dataBuffer = await source
+      .slice(dataOffset, dataOffset + entry.compressedSize)
+      .arrayBuffer();
     const compressedBytes = new Uint8Array(dataBuffer);
 
     let decompressed: Uint8Array;
@@ -352,7 +413,9 @@ export async function readZipSelective(
 
     if (entry.method === 0) {
       if (compressedBytes.length > entryBudget) {
-        throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');
+        throw new Error(
+          'Los JSON superan el límite de 30 MB o 1.000 archivos.',
+        );
       }
       decompressed = compressedBytes;
     } else {
@@ -360,11 +423,15 @@ export async function readZipSelective(
     }
 
     if (decompressed.length !== entry.uncompressedSize) {
-      throw new Error(`El archivo ${entryBase} tiene un tamaño descomprimido inconsistente con el declarado.`);
+      throw new Error(
+        `El archivo ${entryBase} tiene un tamaño descomprimido inconsistente con el declarado.`,
+      );
     }
 
     if (crc32(decompressed) !== entry.crc32) {
-      throw new Error(`Error de integridad (CRC32) en ${entryBase}. El archivo ZIP puede estar dañado.`);
+      throw new Error(
+        `Error de integridad (CRC32) en ${entryBase}. El archivo ZIP puede estar dañado.`,
+      );
     }
 
     cumulativeExtracted += decompressed.length;

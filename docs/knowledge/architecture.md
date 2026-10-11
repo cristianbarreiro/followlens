@@ -1,5 +1,5 @@
 ---
-okf_version: "0.2"
+okf_version: '0.2'
 type: Architecture
 title: Arquitectura del Sistema FollowLens
 description: Especificación técnica integral de componentes, responsabilidades, límites de diseño, estado actual y evolución incremental.
@@ -10,20 +10,22 @@ tags:
   - vite
   - client-side
   - incremental-importer
-timestamp: "2026-10-11T02:00:00-03:00"
+timestamp: '2026-10-11T02:00:00-03:00'
 lifecycle: stable
 ---
 
 # Arquitectura del Sistema FollowLens
 
 ## 1. WHAT — ¿Qué es FollowLens?
+
 FollowLens es una aplicación web SPA construida con React 19 y TypeScript sobre Vite y Vinext. Permite a los usuarios analizar relaciones de cuentas de Instagram (seguidores, seguidos, mutuos, no recíprocos y cambios históricos) procesando directamente las exportaciones oficiales de datos de Instagram en formato JSON o ZIP.
 
 ---
 
 ## 2. WHY — Fundamentos de Diseño
+
 - **Privacidad Radical:** Las listas de seguidores y relaciones sociales son datos personales sensibles. Procesarlas íntegramente en el motor JavaScript local del navegador elimina el riesgo de fuga en tránsito o almacenamiento en servidores terceros.
-- **Sin Credenciales ni API de Instagram:** Usar la API oficial requiere permisos corporativos inaccesibles y tokens de usuario; el scraping automatizado viola los términos de servicio de la plataforma y pone en riesgo la cuenta del usuario. Las exportaciones oficiales de Instagram (*Data Download*) son el método legítimo y seguro otorgado por Meta al usuario.
+- **Sin Credenciales ni API de Instagram:** Usar la API oficial requiere permisos corporativos inaccesibles y tokens de usuario; el scraping automatizado viola los términos de servicio de la plataforma y pone en riesgo la cuenta del usuario. Las exportaciones oficiales de Instagram (_Data Download_) son el método legítimo y seguro otorgado por Meta al usuario.
 - **Comparaciones Observacionales:** Instagram no provee un historial continuo de "quién te dejó de seguir y cuándo". FollowLens modela esto mediante **snapshots observacionales** fechados por el usuario, calculando diferencias matemáticas exactas entre puntos en el tiempo.
 
 ---
@@ -43,12 +45,13 @@ components/
 
 lib/
 ├── importer.ts                  ── Orquestación de importación, integración de zip.ts, validación de partes
+├── html-parser.ts               ── Parser seguro y pasivo de exportaciones HTML de Instagram (DOMParser)
 ├── zip.ts                       ── Lector ZIP selectivo por rangos (EOCD, CD, CRC32, streaming DEFLATE acotado)
 ├── relationships.ts             ── Lógica pura de conjuntos, normalización de usernames, timeline y CSV
 ├── storage.ts                   ── Adaptador de persistencia local en IndexedDB (base 'followlens-local')
 ├── demo.ts                      ── Generador de snapshots sintéticos para exploración sin archivos
 ├── utils.ts                     ── Utilidades de concatenación de clases Tailwind (cn)
-└── relationships.test.ts        ── Pruebas unitarias de parsing, normalización, análisis e importación
+└── relationships.test.ts        ── Pruebas unitarias de parsing (JSON/HTML), normalización, análisis e importación
 ```
 
 ---
@@ -58,6 +61,7 @@ lib/
 ### Estado de la Implementación (`lib/zip.ts` y `lib/importer.ts`)
 
 En la Fase 3, el pipeline de importación fue desacoplado mediante lectura selectiva por rangos:
+
 1. Recibe los archivos seleccionados por el usuario (`File[]`), admitiendo exportaciones completas sin rechazo por tamaño de archivo.
 2. Para archivos ZIP, localiza el registro EOCD en los últimos 65.557 bytes sin leer el archivo entero.
 3. Detecta y rechaza de forma controlada formatos ZIP64 y multidisco.
@@ -123,6 +127,7 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 ## 6. VALIDATION — Protocolo de Verificación
 
 Cualquier cambio estructural debe validarse mediante:
+
 - `npm test`: Ejecución de los 14 tests unitarios de `lib/relationships.test.ts`.
 - `npm run typecheck`: Validación estricta de TypeScript (`tsc --noEmit`).
 - `npm run build`: Empaquetado completo de producción con Vite y Vinext (`vinext build`).

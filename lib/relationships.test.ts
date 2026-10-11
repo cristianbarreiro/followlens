@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { zipSync, strToU8, deflateSync } from 'fflate';
+import { DOMParser } from 'linkedom';
 import {
   analyze,
   parseRelationships,
@@ -9,8 +10,13 @@ import {
   csvRows,
   type Snapshot,
 } from './relationships.ts';
+import { parseHtmlRelationships } from './html-parser.ts';
 import { importFiles } from './importer.ts';
 import { crc32, decompressDeflate } from './zip.ts';
+
+if (typeof globalThis.DOMParser === 'undefined') {
+  globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
+}
 
 const snap = (
   date: string,
@@ -257,10 +263,18 @@ function buildSyntheticZip(
     lv.setUint32(0, entry.lfhSig ?? 0x04034b50, true);
     lv.setUint16(4, 20, true);
     lv.setUint16(6, lfhFlags, true);
-    lv.setUint16(8, entry.lfhMethod !== undefined ? entry.lfhMethod : method, true);
+    lv.setUint16(
+      8,
+      entry.lfhMethod !== undefined ? entry.lfhMethod : method,
+      true,
+    );
     lv.setUint16(10, 0, true);
     lv.setUint16(12, 0, true);
-    lv.setUint32(14, entry.lfhCrc !== undefined ? entry.lfhCrc : finalCrc, true);
+    lv.setUint32(
+      14,
+      entry.lfhCrc !== undefined ? entry.lfhCrc : finalCrc,
+      true,
+    );
     lv.setUint32(
       18,
       entry.lfhCompSize !== undefined ? entry.lfhCompSize : finalCompSize,
@@ -398,7 +412,9 @@ test('ZIP con EOCD y comentarios de distintas longitudes hasta la ventana maxima
 
 test('firma EOCD falsa en comentario, ZIP truncado, cabeceras corruptas y multidisco', async () => {
   const f1 = strToU8(JSON.stringify([record('ana')]));
-  const fol = strToU8(JSON.stringify({ relationships_following: [record('ana')] }));
+  const fol = strToU8(
+    JSON.stringify({ relationships_following: [record('ana')] }),
+  );
 
   // 1. Firma EOCD falsa dentro del comentario
   // El comentario contiene bytes 0x50, 0x4b, 0x05, 0x06 simulando una firma falsa
@@ -497,7 +513,9 @@ test('soporte de entradas STORE y DEFLATE y verificacion de CRC32', async () => 
 
 test('inconsistencia de encabezado local y bit 3 con marcadores legitimately validos', async () => {
   const f1 = strToU8(JSON.stringify([record('user_a')]));
-  const fol = strToU8(JSON.stringify({ relationships_following: [record('user_b')] }));
+  const fol = strToU8(
+    JSON.stringify({ relationships_following: [record('user_b')] }),
+  );
 
   // 1. Inconsistencia de método entre LFH y CD
   const zipBadMethod = buildSyntheticZip([
@@ -521,7 +539,12 @@ test('inconsistencia de encabezado local y bit 3 con marcadores legitimately val
 
   // 3. Nombre de archivo LFH inconsistente con CD (nombre base diferente)
   const zipBadLfhName = buildSyntheticZip([
-    { name: 'followers_1.json', data: f1, method: 8, lfhName: 'otro_nombre.json' },
+    {
+      name: 'followers_1.json',
+      data: f1,
+      method: 8,
+      lfhName: 'otro_nombre.json',
+    },
     { name: 'following.json', data: fol, method: 8 },
   ]);
   await assert.rejects(
@@ -573,7 +596,9 @@ test('inconsistencia de encabezado local y bit 3 con marcadores legitimately val
     { name: 'following.json', data: fol, method: 8 },
   ]);
   await assert.rejects(
-    importFiles([new File([zipNoBit3Mismatch as BlobPart], 'nobit3mismatch.zip')]),
+    importFiles([
+      new File([zipNoBit3Mismatch as BlobPart], 'nobit3mismatch.zip'),
+    ]),
     /Inconsistencia de integridad entre encabezado local y directorio central/i,
   );
 
@@ -601,7 +626,9 @@ test('inconsistencia de encabezado local y bit 3 con marcadores legitimately val
 
 test('rechazo de metodos no soportados, entradas cifradas y formato ZIP64', async () => {
   const f1 = strToU8(JSON.stringify([record('u1')]));
-  const fol = strToU8(JSON.stringify({ relationships_following: [record('u2')] }));
+  const fol = strToU8(
+    JSON.stringify({ relationships_following: [record('u2')] }),
+  );
 
   // 1. Método de compresión no soportado (ej. método 9)
   const zipUnsupportedMethod = buildSyntheticZip([
@@ -609,7 +636,9 @@ test('rechazo de metodos no soportados, entradas cifradas y formato ZIP64', asyn
     { name: 'following.json', data: fol, method: 8 },
   ]);
   await assert.rejects(
-    importFiles([new File([zipUnsupportedMethod as BlobPart], 'unsupported.zip')]),
+    importFiles([
+      new File([zipUnsupportedMethod as BlobPart], 'unsupported.zip'),
+    ]),
     /Método de compresión no soportado \(9\)/i,
   );
 
@@ -667,7 +696,9 @@ test('rechazo de metodos no soportados, entradas cifradas y formato ZIP64', asyn
 
 test('rechazo de offsets invalidos, rangos fuera de limites y discrepancias de tamaño', async () => {
   const f1 = strToU8(JSON.stringify([record('u1')]));
-  const fol = strToU8(JSON.stringify({ relationships_following: [record('u2')] }));
+  const fol = strToU8(
+    JSON.stringify({ relationships_following: [record('u2')] }),
+  );
 
   // 1. localOffset fuera de los límites del archivo
   const zipBadLocalOffset = buildSyntheticZip([
@@ -701,11 +732,18 @@ test('rechazo de offsets invalidos, rangos fuera de limites y discrepancias de t
 
   // 4. Presupuesto acumulado de lectura comprimida excedido (>30 MB)
   const zipCompressedExceeded = buildSyntheticZip([
-    { name: 'followers_1.json', data: f1, method: 8, compSize: 35 * 1024 * 1024 },
+    {
+      name: 'followers_1.json',
+      data: f1,
+      method: 8,
+      compSize: 35 * 1024 * 1024,
+    },
     { name: 'following.json', data: fol, method: 8 },
   ]);
   await assert.rejects(
-    importFiles([new File([zipCompressedExceeded as BlobPart], 'exceededcomp.zip')]),
+    importFiles([
+      new File([zipCompressedExceeded as BlobPart], 'exceededcomp.zip'),
+    ]),
     /Los JSON superan el límite de 30 MB o 1\.000 archivos/i,
   );
 });
@@ -724,7 +762,9 @@ test('detencion temprana de descompresion ante bombas ZIP altamente comprimibles
 
 test('ignora archivos multimedia sin solicitar sus rangos de datos ni descomprimirlos', async () => {
   const f1 = strToU8(JSON.stringify([record('ana')]));
-  const fol = strToU8(JSON.stringify({ relationships_following: [record('ana')] }));
+  const fol = strToU8(
+    JSON.stringify({ relationships_following: [record('ana')] }),
+  );
 
   // Archivo ficticio pesado de fotos y vídeos (150 KB de bytes binarios)
   const photoBytes = new Uint8Array(75000);
@@ -775,8 +815,10 @@ test('ignora archivos multimedia sin solicitar sus rangos de datos ni descomprim
 
   for (const [start, end] of requestedRanges) {
     // Detectar cualquier intersección entre el rango solicitado [start, end] y las regiones de datos multimedia
-    const intersectsPhoto = Math.max(start, photoDataStart) < Math.min(end, photoDataEnd);
-    const intersectsVideo = Math.max(start, videoDataStart) < Math.min(end, videoDataEnd);
+    const intersectsPhoto =
+      Math.max(start, photoDataStart) < Math.min(end, photoDataEnd);
+    const intersectsVideo =
+      Math.max(start, videoDataStart) < Math.min(end, videoDataEnd);
     assert.equal(
       intersectsPhoto || intersectsVideo,
       false,
@@ -815,13 +857,24 @@ test('admite archivo ZIP simulado superior a 200 MB mediante lectura selectiva',
       // Si solicita la ventana del final para EOCD:
       if (start >= tailStart) {
         const offsetInTail = start - tailStart;
-        const smallZipTailOffset = Math.max(0, smallZip.length - eocdAndCdTailSize) + offsetInTail;
-        const clampedEnd = Math.min(smallZip.length, smallZipTailOffset + (end - start));
-        return new Blob([smallZip.subarray(smallZipTailOffset, clampedEnd) as unknown as BlobPart]);
+        const smallZipTailOffset =
+          Math.max(0, smallZip.length - eocdAndCdTailSize) + offsetInTail;
+        const clampedEnd = Math.min(
+          smallZip.length,
+          smallZipTailOffset + (end - start),
+        );
+        return new Blob([
+          smallZip.subarray(
+            smallZipTailOffset,
+            clampedEnd,
+          ) as unknown as BlobPart,
+        ]);
       }
       // Si solicita datos del inicio (LFH y datos JSON):
       const clampedEnd = Math.min(smallZip.length, end);
-      return new Blob([smallZip.subarray(start, clampedEnd) as unknown as BlobPart]);
+      return new Blob([
+        smallZip.subarray(start, clampedEnd) as unknown as BlobPart,
+      ]);
     },
   };
 
@@ -834,4 +887,209 @@ test('admite archivo ZIP simulado superior a 200 MB mediante lectura selectiva',
     totalBytesSliced < 200_000,
     `Se leyeron demasiados bytes (${totalBytesSliced}) en lugar de usar rangos selectivos`,
   );
+});
+
+// -------------------------------------------------------------
+// Fase 5: Pruebas del soporte de exportaciones HTML de Instagram
+// -------------------------------------------------------------
+
+function syntheticHtmlFollowers(
+  usernames: string[],
+  title = 'Seguidores',
+): string {
+  const records = usernames
+    .map(
+      (u) =>
+        `<div class="pam uiBoxWhite noborder"><div class="_a6-p"><div><div><a target="_blank" href="https://www.instagram.com/${u}">${u}</a></div><div>Oct 8, 2026, 12:00 PM</div></div></div></div>`,
+    )
+    .join('\n');
+  return `<!DOCTYPE html><html><head><title>${title}</title></head><body><div class="_li"><main role="main">${records}</main></div></body></html>`;
+}
+
+function syntheticHtmlFollowing(
+  items: { username: string; heading?: string; hrefSlug?: string }[],
+  title = 'Seguidos',
+): string {
+  const records = items
+    .map((item) => {
+      const headingHtml = item.heading
+        ? `<h2 class="_3-95 _2pim">${item.heading}</h2>`
+        : '';
+      const slug = item.hrefSlug ?? item.username;
+      return `<div class="pam uiBoxWhite noborder">${headingHtml}<div class="_a6-p"><div><div><a target="_blank" href="https://www.instagram.com/_u/${slug}">${item.username}</a></div><div>Oct 8, 2026, 12:00 PM</div></div></div></div>`;
+    })
+    .join('\n');
+  return `<!DOCTYPE html><html><head><title>${title}</title></head><body><div class="_li"><main role="main">${records}</main></div></body></html>`;
+}
+
+test('importa ZIP con listas HTML validas y analiza relaciones correctamente', async () => {
+  const htmlF = strToU8(syntheticHtmlFollowers(['alice', 'bob']));
+  const htmlG = strToU8(
+    syntheticHtmlFollowing([{ username: 'bob' }, { username: 'charlie' }]),
+  );
+
+  const zip = buildSyntheticZip([
+    {
+      name: 'connections/followers_and_following/followers_1.html',
+      data: htmlF,
+      method: 8,
+    },
+    {
+      name: 'connections/followers_and_following/following.html',
+      data: htmlG,
+      method: 8,
+    },
+  ]);
+
+  const res = await importFiles([
+    new File([zip as BlobPart], 'export_html.zip'),
+  ]);
+  assert.equal(res.fileCount, 2);
+  assert.deepEqual(res.followers, ['alice', 'bob']);
+  assert.deepEqual(res.following, ['bob', 'charlie']);
+
+  // Validar lógica de relaciones existente
+  const rels = analyze({
+    id: 'snap1',
+    account: 'me',
+    date: '2026-10-08',
+    importedAt: '2026-10-08T12:00:00Z',
+    followers: res.followers,
+    following: res.following,
+  });
+  assert.deepEqual(rels.mutuals, ['bob']);
+  assert.deepEqual(rels.notBack, ['charlie']);
+  assert.deepEqual(rels.fans, ['alice']);
+});
+
+test('admite multipartes HTML de seguidores y detecta saltos secuenciales', async () => {
+  const f1 = strToU8(syntheticHtmlFollowers(['u1', 'u2']));
+  const f2 = strToU8(syntheticHtmlFollowers(['u3', 'u4']));
+  const fol = strToU8(syntheticHtmlFollowing([{ username: 'u1' }]));
+
+  // 1. Multipartes válidas 1 y 2
+  const zipParts = buildSyntheticZip([
+    { name: 'followers_1.html', data: f1, method: 8 },
+    { name: 'followers_2.html', data: f2, method: 8 },
+    { name: 'following.html', data: fol, method: 8 },
+  ]);
+  const res = await importFiles([
+    new File([zipParts as BlobPart], 'parts.zip'),
+  ]);
+  assert.deepEqual(res.followers, ['u1', 'u2', 'u3', 'u4']);
+
+  // 2. Salto de partes (1 y 3 sin 2)
+  const zipJump = buildSyntheticZip([
+    { name: 'followers_1.html', data: f1, method: 8 },
+    { name: 'followers_3.html', data: f2, method: 8 },
+    { name: 'following.html', data: fol, method: 8 },
+  ]);
+  await assert.rejects(
+    importFiles([new File([zipJump as BlobPart], 'jump.zip')]),
+    /Falta una parte de followers/i,
+  );
+});
+
+test('extraccion HTML desde rutas /_u/, entidades, encabezados y descarte de enlaces ajenos', () => {
+  const html = `<!DOCTYPE html><html><head><title>Seguidos</title></head><body><main>
+    <div class="pam uiBoxWhite"><h2 class="_2pim">user_from_h2</h2><div class="_a6-p"><div><div><a href="https://www.instagram.com/_u/slug_user">Display Name</a></div><div>Oct 8, 2026</div></div></div></div>
+    <div class="pam uiBoxWhite"><div class="_a6-p"><div><div><a href="https://www.instagram.com/entity_user">&commat;entity_user</a></div><div>Oct 8, 2026</div></div></div></div>
+    <div class="pam uiBoxWhite"><div class="_a6-p"><div><div><a href="https://www.instagram.com/legal/terms">Terms</a></div><div>Oct 8, 2026</div></div></div></div>
+    <div class="pam uiBoxWhite"><div class="_a6-p"><div><div><a href="https://about.meta.com">About Meta</a></div><div>Oct 8, 2026</div></div></div></div>
+  </main></body></html>`;
+
+  const parsed = parseHtmlRelationships(html, 'following');
+  assert.deepEqual(parsed, ['entity_user', 'slug_user']);
+});
+
+test('rechazo de HTML vacio, malformado o sin estructura reconocible', () => {
+  // Vacío
+  assert.throws(
+    () => parseHtmlRelationships('', 'followers'),
+    /está vacío o no es válido/i,
+  );
+
+  // Documento sin estructura compatible de Instagram
+  const badHtml = `<!DOCTYPE html><html><head><title>Recetas de Cocina</title></head><body><p>Texto</p><a href="https://recetas.com">Receta</a></body></html>`;
+  assert.throws(
+    () => parseHtmlRelationships(badHtml, 'followers'),
+    /no tiene una estructura compatible/i,
+  );
+});
+
+test('ignora archivos HTML ajenos dentro del ZIP y no los procesa', async () => {
+  const f1 = strToU8(syntheticHtmlFollowers(['usuario_a']));
+  const fol = strToU8(syntheticHtmlFollowing([{ username: 'usuario_b' }]));
+  const unrelatedHtml = strToU8(
+    `<!DOCTYPE html><html><body><h1>start_here</h1></body></html>`,
+  );
+  const chatHtml = strToU8(
+    `<!DOCTYPE html><html><body><h1>chats</h1></body></html>`,
+  );
+
+  const zip = buildSyntheticZip([
+    { name: 'start_here.html', data: unrelatedHtml, method: 0 },
+    {
+      name: 'your_instagram_activity/messages/chats.html',
+      data: chatHtml,
+      method: 0,
+    },
+    {
+      name: 'connections/followers_and_following/followers_1.html',
+      data: f1,
+      method: 8,
+    },
+    {
+      name: 'connections/followers_and_following/following.html',
+      data: fol,
+      method: 8,
+    },
+  ]);
+
+  const res = await importFiles([
+    new File([zip as BlobPart], 'unrelated_html.zip'),
+  ]);
+  assert.equal(res.fileCount, 2);
+  assert.deepEqual(res.followers, ['usuario_a']);
+  assert.deepEqual(res.following, ['usuario_b']);
+});
+
+test('rechazo de importacion con formatos mezclados JSON y HTML', async () => {
+  const fJson = strToU8(JSON.stringify([record('u1')]));
+  const folHtml = strToU8(syntheticHtmlFollowing([{ username: 'u2' }]));
+
+  const zipMixed = buildSyntheticZip([
+    { name: 'followers_1.json', data: fJson, method: 8 },
+    { name: 'following.html', data: folHtml, method: 8 },
+  ]);
+
+  await assert.rejects(
+    importFiles([new File([zipMixed as BlobPart], 'mixed_formats.zip')]),
+    /No mezcles archivos JSON y HTML/i,
+  );
+});
+
+test('admite importacion de archivos HTML sueltos sin ZIP', async () => {
+  const htmlF = syntheticHtmlFollowers(['persona1', 'persona2']);
+  const htmlG = syntheticHtmlFollowing([{ username: 'persona2' }]);
+
+  const fileF = new File([htmlF], 'followers_1.html');
+  const fileG = new File([htmlG], 'following.html');
+
+  const res = await importFiles([fileF, fileG]);
+  assert.equal(res.fileCount, 2);
+  assert.deepEqual(res.followers, ['persona1', 'persona2']);
+  assert.deepEqual(res.following, ['persona2']);
+});
+
+test('admite lista HTML de seguidores legitimamente vacia', async () => {
+  const emptyHtmlF = `<!DOCTYPE html><html><head><title>Seguidores</title></head><body><main role="main"></main></body></html>`;
+  const htmlG = syntheticHtmlFollowing([{ username: 'alguien' }]);
+
+  const res = await importFiles([
+    new File([emptyHtmlF], 'followers_1.html'),
+    new File([htmlG], 'following.html'),
+  ]);
+  assert.deepEqual(res.followers, []);
+  assert.deepEqual(res.following, ['alguien']);
 });
