@@ -203,7 +203,7 @@ export function ImportDialog({
             <p>
               {files.length
                 ? files.map((f) => f.name).join(', ')
-                : 'ZIP o archivos individuales JSON/HTML del mismo formato, con seguidores y seguidos · Hasta 30 MB por archivo individual'}
+                : 'ZIP o archivos individuales JSON/HTML del mismo formato, con seguidores y seguidos · Hasta 30 MiB en total para archivos individuales'}
             </p>
             <button
               type="button"
