@@ -16,6 +16,7 @@
     "benchmark:importer": "node --expose-gc scripts/importer-benchmark.ts",
     "benchmark:importer:browser": "playwright test --config=playwright.browser-benchmark.config.ts",
     "benchmark:importer:stages": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"measures medium synthetic relationship import|measures a valid import at the cumulative 30 MiB boundary\" --repeat-each=2",
+    "benchmark:importer:realistic": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks realistic high-cardinality relationship imports in Chromium\" --repeat-each=2",
     "profile:importer:browser": "node scripts/profile-importer-browser.ts",
     "typecheck": "tsc --noEmit"
   },

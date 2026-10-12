@@ -34,8 +34,9 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 34 tests unitarios nativos (0 suites).            |
 | `npm run test:e2e`  | Ejecuta regresiones de importación en Chromium real.      | Playwright Test                                   | Inicia Vinext local; requiere Chromium instalado. |
 | `npm run benchmark:importer` | Mide escenarios sintéticos del pipeline de importación. | Node.js 24 + `--expose-gc` | Opt-in; informa tiempos y snapshots aproximados de memoria, sin umbrales. |
-| `npm run benchmark:importer:browser` | Mide importaciones sintéticas medianas y cercanas al límite en Chromium. | Playwright Test + Chromium | Ejecución independiente; no forma parte de `test:e2e`. |
+| `npm run benchmark:importer:browser` | Mide importaciones sintéticas medianas, de alta cardinalidad y cercanas al límite en Chromium. | Playwright Test + Chromium | Ejecución independiente; incluye rechazo del límite y recuperación. |
 | `npm run benchmark:importer:stages` | Compara ZIP DEFLATE/STORE y tiempos por etapa en Chromium. | Playwright Test + Chromium | Dos repeticiones de mediano y 30 MiB; diagnósticos opt-in, sin umbrales. |
+| `npm run benchmark:importer:realistic` | Compara importaciones relacionales sintéticas de alta cardinalidad en Chromium. | Playwright Test + Chromium | Tres escalas, dos repeticiones y DEFLATE/STORE; opt-in, sin umbrales. |
 | `npm run profile:importer:browser` | Perfila el hot path ZIP en Chromium mediante CDP. | Playwright + Chrome DevTools Protocol | Opt-in, 2 repeticiones por carga; no guarda perfiles crudos. |
 | `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.           |
 | `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.          |
@@ -121,7 +122,7 @@ Los escenarios medianos completan el import en decenas de milisegundos y el ZIP 
 
 ### Validación de escala en Chromium (Fase 10)
 
-Ejecutá `npm run benchmark:importer:browser` con Node.js 24+ y Chromium instalado (`npx playwright install chromium`). Este comando usa un config Playwright separado y no agrega casos pesados a `npm run test:e2e`. Levanta el servidor Vinext local y recorre el diálogo de importación real. Todos los usernames y ZIP son sintéticos; el payload de límite se crea con una lista pequeña JSON válida más espacios JSON en blanco, sin datos personales. El benchmark comprueba el tamaño sin comprimir acumulado de las entradas relacionales y el comprimido declarado por el directorio central; no confunde el tamaño del contenedor ZIP con esos presupuestos.
+Ejecutá `npm run benchmark:importer:browser` con Node.js 24+ y Chromium instalado (`npx playwright install chromium`). Este comando usa un config Playwright separado y no agrega casos pesados a `npm run test:e2e`. Levanta el servidor Vinext local y recorre el diálogo de importación real; incluye el test de Fase 13 de alta cardinalidad una vez, además del mediano, el stress de límite con whitespace artificial, el exceso de 1 byte y la recuperación. Todos los usernames y ZIP son sintéticos, y el benchmark comprueba los límites de bytes comprimidos y descomprimidos desde los metadatos del ZIP.
 
 En Windows, Node.js 24.16.0 y Chromium 156.0.8078.4, una corrida independiente registró:
 
@@ -181,6 +182,45 @@ Los tiempos por etapa son mediciones instrumentadas de pared dentro de Chromium;
 **Interpretación y límites:** la medición localiza un coste síncrono importante en DEFLATE (`296–311 ms`) y un coste CRC independiente del método (`95–101 ms`); concuerda con los perfiles CDP de Fase 11 (`inflt` y `crc32`), pero ahora la duración de pared se obtiene mediante instrumentación interna. Para este JSON de límite extremadamente compresible, STORE elimina el inflado pero hace leer ~30 MiB en vez de ~30 KB comprimidos; por ello la diferencia observada no predice el comportamiento de exportaciones reales. El ensamblado sí quedó medido por separado (18 ms en los 3 bloques DEFLATE); la recogida de bloques reportó 0 ms y la asignación 0,0–0,1 ms a la resolución práctica del timer. CRC permanece alrededor de 100 ms incluso con STORE. UTF-8 y JSON suman decenas de milisegundos; el parser/álgebra de relaciones y `analyze` son pequeños porque el payload de límite contiene un único usuario y padding JSON, no millones de registros. El tiempo restante entre la importación interna aislada y el resultado UI no se atribuye por resta, porque son ejecuciones separadas con scheduling distinto; el intervalo UI también contiene estado React y actualización/render del dashboard.
 
 No se cambió el algoritmo de producción, sus límites, la extracción selectiva ni la verificación CRC. Las mediciones tienen dos repeticiones en una máquina, `performance.now()` resolución/práctica variable y sobrecarga de callback solo en la corrida instrumentada; no son garantías ni umbrales. Una siguiente fase que considere optimizar debería primero repetir con JSON sintético de cardinalidad alta y distribución de texto menos compresible, en más de un navegador/dispositivo, midiendo memoria de proceso/browser por separado; después validar cualquier cambio contra límites, CRC, casos STORE/DEFLATE y los perfiles previos. No se retienen perfiles crudos, fixtures persistentes ni exportaciones reales.
+
+### Línea de base de relaciones JSON realistas de alta cardinalidad (Fase 13)
+
+Ejecutá `npm run benchmark:importer:realistic` desde la raíz con Node.js 24+ y Chromium instalado. El config de Playwright y el servidor Vinext son los mismos que en otros benchmarks de navegador; el comando está fuera de `npm test`, `npm run test:e2e` y CI. Cada ejecución realiza dos repeticiones del test, que recorre tres escalas y genera variantes DEFLATE y STORE. La primera escala mediana sirve como referencia y calentamiento del runtime; se conservan sus medidas en la salida y no se presenta como una corrida descartada.
+
+Los fixtures se generan en memoria con usernames deterministas con prefijos sintéticos, timestamps numéricos variables y el esquema oficial plano de `followers_1.json` y envuelto de `following.json`. Todos los registros tienen estructura JSON completa (incluye `title`, `string_list_data`, `href`, `value` y `timestamp`); no se agrega whitespace para aumentar el tamaño. Cada variante de compresión serializa el mismo contenido. Antes de importar, se comprueban JSON y esquema, conteos, método real desde el directorio central y límites comprimidos/descomprimidos por entrada y acumulados. Durante la ejecución se afirma que los conteos de followers, following, mutuals y no recíprocos coinciden tanto en el resultado de `importFiles` como en el dashboard.
+
+| Escala | Conteos sintéticos esperados | Datos relacionales descomprimidos | Método/tamaño de entrada |
+|---|---|---:|---|
+| Mediana de referencia | 5.000 seguidores / 4.000 seguidos / 2.500 mutuos / 1.500 no recíprocos | 1.377.030 B | DEFLATE 8 y STORE 0 verificados en directorio central |
+| Alta cardinalidad | 30.000 seguidores / 24.000 seguidos / 15.000 mutuos / 9.000 no recíprocos | 8.262.030 B | DEFLATE 8 y STORE 0 verificados en directorio central |
+| Máxima práctica cercana al límite | 114.000 seguidores / 90.000 seguidos / 56.250 mutuos / 33.750 no recíprocos | 31.200.030 B (29,75 MiB) | STORE queda 257.250 B bajo el presupuesto comprimido de 30 MiB |
+
+Cada línea JSON de salida incluye tamaños del ZIP completo, bytes comprimidos y descomprimidos acumulados y por entrada, ratio comprimido/descomprimido, método confirmado, versión Node/Chromium, conteos esperados/reales, duración Chromium y Playwright, etapas instrumentadas, tareas largas y memoria JS si `performance.memory` está disponible. La importación diagnóstica con callback y el flujo UI medido sin callback son importaciones distintas; los resultados instrumentados no se mezclan con los de pared sin instrumentación. Los reportes incluyen solo métricas técnicas y conteos, nunca los usernames ni el texto relacional. El detector de solicitudes solo permite el origen local de la app y la prueba falla ante errores de consola/página o tráfico externo.
+
+En Windows con Node.js 24.16.0, Playwright 1.64.0 y Chromium 156.0.8078.4, las dos repeticiones registraron estos tamaños (en la columna comprimida y ZIP: corrida 1 / corrida 2; en cada variante las repeticiones fueron idénticas):
+
+| Escala | ZIP DEFLATE / STORE (B) | Comprimido relevante DEFLATE / STORE (B) | Descomprimido por entrada (followers / following, B) | Ratio comprimido/descomprimido DEFLATE / STORE |
+|---|---:|---:|---:|---:|
+| Mediana | 119.931 / 1.377.408 | 119.553 / 1.377.030 | 725.001 / 652.029 | 0,0868 / 1 |
+| Alta cardinalidad | 715.651 / 8.262.408 | 715.273 / 8.262.030 | 4.350.001 / 3.912.029 | 0,0866 / 1 |
+| Máxima práctica | 2.699.378 / 31.200.408 | 2.699.000 / 31.200.030 | 16.530.001 / 14.670.029 | 0,0865 / 1 |
+
+Resultados individuales en milisegundos; los pares separados por `/` son corrida 1 / corrida 2. Las etapas instrumentadas se ejecutan en una importación diagnóstica independiente; `UI Chromium / harness` corresponde a una segunda importación real sin callback diagnóstico. `DEFLATE` es el tiempo síncrono de inflater (no aplica a STORE), `JSON` es el tiempo agregado de parseo JSON y `relaciones` es parseo/normalización/deduplicación/ordenación:
+
+| Escala / método | Import-total instrumentado | DEFLATE | CRC32 | JSON | Relaciones | `analyze` aparte | UI Chromium / harness | Tareas largas (cantidad; máxima) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Mediana / DEFLATE | 84,6 / 79,2 | 44,0 / 47,6 | 4,9 / 4,8 | 4,9 / 4,5 | 17,9 / 8,7 | 2,4 / 1,8 | 204,7 / 210,2 · 334,83 / 339,35 | 1 / 1; 122 / 126 |
+| Mediana / STORE | 29,3 / 31,4 | — | 6,2 / 5,6 | 5,6 / 6,7 | 5,6 / 7,4 | 1,9 / 2,0 | 149,8 / 147,2 · 245,91 / 245,49 | 1 / 1; 68 / 74 |
+| Alta cardinalidad / DEFLATE | 250,8 / 298,1 | 136,6 / 142,7 | 25,3 / 27,5 | 28,5 / 47,8 | 30,4 / 33,1 | 12,9 / 13,7 | 328,7 / 352,0 · 426,47 / 443,86 | 3 / 3; 142 / 158 |
+| Alta cardinalidad / STORE | 115,4 / 117,0 | — | 25,6 / 26,0 | 28,7 / 29,3 | 28,0 / 30,0 | 11,2 / 9,8 | 251,8 / 283,6 · 383,44 / 409,53 | 2 / 2; 86 / 105 |
+| Máxima práctica / DEFLATE | 871,6 / 859,9 | 421,0 / 374,2 | 94,4 / 95,5 | 130,6 / 126,7 | 120,9 / 148,4 | 62,7 / 75,4 | 1.074,5 / 1.056,5 · 1.123,89 / 1.103,89 | 3 / 3; 609 / 573 |
+| Máxima práctica / STORE | 466,9 / 474,8 | — | 94,4 / 94,4 | 125,0 / 126,1 | 146,5 / 152,2 | 51,0 / 49,2 | 712,8 / 708,0 · 791,32 / 845,50 | 3 / 3; 414 / 378 |
+
+Las seis combinaciones entregaron los conteos esperados tanto en `importFiles` como en el dashboard. DEFLATE near-limit emitió 166 bloques y 31.200.030 bytes en ambas corridas; los escenarios mediano y alto emitieron 8 y 45 bloques, respectivamente. En las lecturas de memoria disponibles, `performance.memory` mostró 39,6 MB antes/después en la primera repetición y 42,1 MB en la segunda; son snapshots aproximados del heap JS, no picos ni memoria del proceso. El benchmark registró cero errores de consola/página y cero solicitudes externas.
+
+**Interpretación y límites:** los fixtures realistas no tienen relleno, pero siguen siendo muy compresibles por el esquema JSON compartido y los prefijos deterministas: DEFLATE produjo alrededor del 8,65% del tamaño descomprimido. En el caso near-limit, STORE redujo el tiempo UI observado frente a DEFLATE en estas corridas, mientras que el tiempo instrumentado de inflater fue 374–421 ms; ambos métodos mantuvieron CRC en ~94–96 ms y el parseo JSON en ~125–131 ms. La normalización/ordenación también creció hasta ~121–152 ms. Esto confirma que al aumentar relaciones dejan de ser despreciables el parseo y el trabajo de conjuntos, pero no permite extrapolar la diferencia STORE/DEFLATE a exportaciones reales. La interfaz no tiene un timer independiente para el trabajo React/render; no se atribuye el remanente por resta entre importaciones distintas. El perfil de CPU tampoco mide memoria transitoria.
+
+El fixture near-limit se dimensiona desde registros completos, no whitespace, y queda 257.250 B por debajo de los presupuestos comprimido y descomprimido de 30 MiB. El test de 30 MiB exactos formado con un registro y whitespace sigue existiendo como estrés artificial, altamente compresible y diferenciado. El conteo grande crea muchas instancias/strings en `JSON.parse`, normalización y análisis en el heap del navegador; lectura ZIP selectiva no implica memoria constante. No hay umbrales rígidos y dos repeticiones en una sola configuración Chromium no son garantías ni permiten extrapolar a exportaciones reales. El siguiente experimento debería cambiar por separado la distribución/compresibilidad manteniendo idénticos registros y cardinalidad, y perfilar el intervalo UI con marcadores internos de React/estado antes de decidir una optimización o un Worker; no se cambió producción.
 
 ---
 

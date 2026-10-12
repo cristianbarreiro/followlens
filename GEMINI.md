@@ -26,8 +26,9 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
 
 - `npm test`: Run 34 unit tests (`node --test lib/relationships.test.ts`).
 - `npm run benchmark:importer`: Run synthetic Node.js importer performance scenarios.
-- `npm run benchmark:importer:browser`: Run isolated medium/near-limit Chromium import scenarios.
+- `npm run benchmark:importer:browser`: Run isolated medium, high-cardinality and near-limit Chromium import scenarios.
 - `npm run benchmark:importer:stages`: Compare DEFLATE/STORE and measure browser import stages.
+- `npm run benchmark:importer:realistic`: Compare realistic high-cardinality JSON imports at three scales in Chromium.
 - `npm run profile:importer:browser`: Profile repeated medium/near-limit imports through Chrome DevTools Protocol.
 - `npm run typecheck`: Strict TypeScript check (`tsc --noEmit`).
 - `npm run build`: Production compilation (`vinext build`).

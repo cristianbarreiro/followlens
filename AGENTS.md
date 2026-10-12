@@ -89,8 +89,9 @@ Derived directly from `package.json`:
 | **Build** | `npm run build` | Compile production client and SSR bundles. | `vinext build` (Vite 8.2.2). |
 | **Testing** | `npm test` | Run 34 unit tests. | `node --test lib/relationships.test.ts`. |
 | **Importer benchmark** | `npm run benchmark:importer` | Measure synthetic import stages and resource snapshots in Node.js. | Optional local benchmark; no timing thresholds. |
-| **Browser-scale benchmark** | `npm run benchmark:importer:browser` | Measure synthetic medium and near-limit imports in Chromium. | Standalone opt-in run; install Chromium with Playwright. |
+| **Browser-scale benchmark** | `npm run benchmark:importer:browser` | Measure synthetic medium, high-cardinality and near-limit imports in Chromium. | Standalone opt-in run; includes limit rejection/recovery. |
 | **Browser stage comparison** | `npm run benchmark:importer:stages` | Compare DEFLATE/STORE and instrument browser import stages. | Two repetitions per synthetic scenario; opt-in, no thresholds. |
+| **Realistic browser benchmark** | `npm run benchmark:importer:realistic` | Compare high-cardinality official-schema JSON imports in Chromium. | Three scales and two repetitions; synthetic, opt-in, no thresholds. |
 | **Browser CPU profile** | `npm run profile:importer:browser` | Profile medium and near-limit imports with CDP. | Standalone opt-in; summary only, no raw profile files. |
 | **Browser E2E** | `npm run test:e2e` | Run importer regressions in Chromium. | Install once with `npx playwright install chromium`. |
 | **Typecheck** | `npm run typecheck` | Run strict TypeScript validation. | `tsc --noEmit`. |

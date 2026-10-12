@@ -49,6 +49,7 @@ type SyntheticArchive = {
   archiveBytes: number;
   compressedBytes: number;
   uncompressedBytes: number;
+  entryUncompressedBytes: number[];
   compression: ZipCompression;
   compressionMethod: 0 | 8;
   counts: RelationshipCounts;
@@ -153,6 +154,7 @@ function makeRelationshipZip(
     archiveBytes: archive.byteLength,
     compressedBytes: metadata.compressedBytes,
     uncompressedBytes: followerBytes.byteLength + followingBytes.byteLength,
+    entryUncompressedBytes: metadata.entryUncompressedBytes,
     compression,
     compressionMethod: expectedMethod,
     counts: {
@@ -167,6 +169,7 @@ function makeRelationshipZip(
 function inspectArchive(archive: Uint8Array): {
   compressedBytes: number;
   uncompressedBytes: number;
+  entryUncompressedBytes: number[];
   relevantEntries: number;
   compressionMethods: number[];
 } {
@@ -191,6 +194,7 @@ function inspectArchive(archive: Uint8Array): {
   let cursor = centralOffset;
   let compressedBytes = 0;
   let uncompressedBytes = 0;
+  const entryUncompressedBytes: number[] = [];
   let relevantEntries = 0;
   const compressionMethods: number[] = [];
   while (cursor < centralEnd) {
@@ -207,6 +211,7 @@ function inspectArchive(archive: Uint8Array): {
     if (/(?:^|\/)(?:followers_\d+|following)\.json$/i.test(name)) {
       compressedBytes += compressedSize;
       uncompressedBytes += uncompressedSize;
+      entryUncompressedBytes.push(uncompressedSize);
       relevantEntries += 1;
       compressionMethods.push(view.getUint16(cursor + 10, true));
     }
@@ -217,6 +222,7 @@ function inspectArchive(archive: Uint8Array): {
   return {
     compressedBytes,
     uncompressedBytes,
+    entryUncompressedBytes,
     relevantEntries,
     compressionMethods,
   };
@@ -278,6 +284,7 @@ function makeBudgetZip(
     archiveBytes: archive.byteLength,
     compressedBytes: metadata.compressedBytes,
     uncompressedBytes: metadata.uncompressedBytes,
+    entryUncompressedBytes: metadata.entryUncompressedBytes,
     compression,
     compressionMethod: expectedMethod,
     counts: { followers: 1, following: 0, mutuals, notBack: 0 },
@@ -309,6 +316,172 @@ function mediumArchive(compression: ZipCompression): SyntheticArchive {
     throw new Error('Synthetic medium fixture relationship counts are invalid.');
   }
   return archive;
+}
+
+function isOfficialRelationshipRow(value: unknown): boolean {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('title' in value) ||
+    typeof value.title !== 'string' ||
+    !('string_list_data' in value) ||
+    !Array.isArray(value.string_list_data)
+  ) {
+    return false;
+  }
+  const first = value.string_list_data[0];
+  return (
+    !!first &&
+    typeof first === 'object' &&
+    'value' in first &&
+    typeof first.value === 'string' &&
+    'href' in first &&
+    typeof first.href === 'string' &&
+    'timestamp' in first &&
+    typeof first.timestamp === 'number'
+  );
+}
+
+function realisticUsername(kind: 'f' | 'n', index: number): string {
+  return `synthetic_${kind}_${index.toString(36).padStart(6, '0')}`;
+}
+
+function realisticTimestamp(kind: 'f' | 'n', index: number): number {
+  return (
+    1_600_000_000 +
+    ((index * 104_729 + (kind === 'f' ? 8_191 : 97_409)) % 200_000_000)
+  );
+}
+
+function officialRelationshipRow(
+  username: string,
+  title: string,
+  timestamp: number,
+): string {
+  return JSON.stringify({
+    title,
+    string_list_data: [
+      {
+        href: `https://www.instagram.com/_u/${username}`,
+        value: username,
+        timestamp,
+      },
+    ],
+  });
+}
+
+function validateRealisticJson(
+  followerJson: string,
+  followingJson: string,
+  followerCount: number,
+  followingCount: number,
+): void {
+  const parsedFollowers: unknown = JSON.parse(followerJson);
+  const parsedFollowing: unknown = JSON.parse(followingJson);
+  if (
+    !Array.isArray(parsedFollowers) ||
+    parsedFollowers.length !== followerCount ||
+    !isOfficialRelationshipRow(parsedFollowers[0]) ||
+    !isOfficialRelationshipRow(parsedFollowers.at(-1)) ||
+    !parsedFollowing ||
+    typeof parsedFollowing !== 'object' ||
+    !('relationships_following' in parsedFollowing) ||
+    !Array.isArray(parsedFollowing.relationships_following) ||
+    parsedFollowing.relationships_following.length !== followingCount ||
+    !isOfficialRelationshipRow(parsedFollowing.relationships_following[0]) ||
+    !isOfficialRelationshipRow(parsedFollowing.relationships_following.at(-1))
+  ) {
+    throw new Error(
+      'Synthetic high-cardinality JSON does not match Instagram schemas.',
+    );
+  }
+}
+
+function realisticArchive(
+  followerCount: number,
+  followingCount: number,
+  mutualCount: number,
+  compression: ZipCompression,
+): SyntheticArchive {
+  if (
+    mutualCount > followerCount ||
+    mutualCount > followingCount ||
+    followerCount < 1 ||
+    followingCount < 1
+  ) {
+    throw new Error('Synthetic relationship counts are inconsistent.');
+  }
+
+  const followerRows = Array.from({ length: followerCount }, (_, index) => {
+    const username = realisticUsername('f', index);
+    return officialRelationshipRow(
+      username,
+      '',
+      realisticTimestamp('f', index),
+    );
+  });
+  const followingRows = Array.from({ length: followingCount }, (_, index) => {
+    const isMutual = index < mutualCount;
+    const kind = isMutual ? 'f' : 'n';
+    const username = realisticUsername(
+      kind,
+      isMutual ? index : index - mutualCount,
+    );
+    return officialRelationshipRow(
+      username,
+      username,
+      realisticTimestamp(kind, isMutual ? index : index - mutualCount),
+    );
+  });
+  const followerJson = `[${followerRows.join(',')}]`;
+  const followingJson = `{"relationships_following":[${followingRows.join(',')}]}`;
+  validateRealisticJson(
+    followerJson,
+    followingJson,
+    followerCount,
+    followingCount,
+  );
+
+  const followerBytes = strToU8(followerJson);
+  const followingBytes = strToU8(followingJson);
+  const archiveBytes = zipSync(
+    {
+      'connections/followers_and_following/followers_1.json': followerBytes,
+      'connections/followers_and_following/following.json': followingBytes,
+    },
+    { level: compression === 'store' ? 0 : 6 },
+  );
+  const metadata = inspectArchive(archiveBytes);
+  const expectedMethod = compression === 'store' ? 0 : 8;
+  if (
+    metadata.relevantEntries !== 2 ||
+    metadata.compressionMethods.some((method) => method !== expectedMethod) ||
+    metadata.uncompressedBytes !==
+      followerBytes.byteLength + followingBytes.byteLength ||
+    metadata.uncompressedBytes > MAX_JSON_TOTAL ||
+    metadata.compressedBytes > MAX_COMPRESSED_TOTAL ||
+    metadata.entryUncompressedBytes.some((size) => size > MAX_JSON_ENTRY)
+  ) {
+    throw new Error(
+      `Synthetic high-cardinality ZIP does not fit importer limits or method ${expectedMethod} (compressed ${metadata.compressedBytes} B, uncompressed ${metadata.uncompressedBytes} B).`,
+    );
+  }
+
+  return {
+    buffer: Buffer.from(archiveBytes),
+    archiveBytes: archiveBytes.byteLength,
+    compressedBytes: metadata.compressedBytes,
+    uncompressedBytes: metadata.uncompressedBytes,
+    entryUncompressedBytes: metadata.entryUncompressedBytes,
+    compression,
+    compressionMethod: expectedMethod,
+    counts: {
+      followers: followerCount,
+      following: followingCount,
+      mutuals: mutualCount,
+      notBack: followingCount - mutualCount,
+    },
+  };
 }
 
 async function openImportDialog(
@@ -420,6 +593,10 @@ async function measureInstrumentedImport(
       archiveBytes: archive.archiveBytes,
       relevantCompressedBytes: archive.compressedBytes,
       relevantUncompressedBytes: archive.uncompressedBytes,
+      relevantEntryUncompressedBytes: archive.entryUncompressedBytes,
+      compressedToUncompressedRatio: Number(
+        (archive.compressedBytes / archive.uncompressedBytes).toFixed(4),
+      ),
       instrumentedImportWallMs: Number(result.importWallMs.toFixed(2)),
       analyzeWallMs: Number(result.analyzeWallMs.toFixed(2)),
       expectedCounts: archive.counts,
@@ -661,9 +838,9 @@ function summarizeCpuProfile(profile: CpuProfile) {
   const topSelfRows = allRows.filter((row) => row.selfMs > 0);
   const targets = allRows.filter((row) =>
     (row.selfMs > 0 || row.inclusiveMs > 0) &&
-    /readZipSelective|decompressDeflate|crc32|strFromU8|parseRelationships|normalize|analyze|JSON\.parse|inflt|inflate|cbuf|slc|decode|sort/i.test(
-      row.functionName,
-    ),
+      /readZipSelective|decompressDeflate|crc32|strFromU8|parseRelationships|normalize|analyze|JSON\.parse|inflt|inflate|cbuf|slc|decode|sort/i.test(
+        row.functionName,
+      ),
   );
   return {
     profiler: 'Chrome DevTools Protocol Profiler; sampled CPU time from timeDeltas',
@@ -676,7 +853,7 @@ function summarizeCpuProfile(profile: CpuProfile) {
       .map((row) => ({
         ...row,
         callers: [...(callersByFrame.get(
-          `${row.functionName === '(anonymous)' ? '' : row.functionName}|${row.source}|${row.line}`,
+            `${row.functionName === '(anonymous)' ? '' : row.functionName}|${row.source}|${row.line}`,
         ) ?? [])].slice(0, 5),
         selfMs: Number(row.selfMs.toFixed(2)),
         inclusiveMs: Number(row.inclusiveMs.toFixed(2)),
@@ -797,6 +974,10 @@ function logMetrics(
       archiveBytes: archive.archiveBytes,
       relevantCompressedBytes: archive.compressedBytes,
       relevantUncompressedBytes: archive.uncompressedBytes,
+      relevantEntryUncompressedBytes: archive.entryUncompressedBytes,
+      compressedToUncompressedRatio: Number(
+        (archive.compressedBytes / archive.uncompressedBytes).toFixed(4),
+      ),
       compression: archive.compression,
       declaredZipMethod: archive.compressionMethod,
       expectedCounts: archive.counts,
@@ -908,6 +1089,82 @@ test('measures medium synthetic relationship import and compares compression met
       actualCounts,
     );
     logCpuProfile(scenario, profiled.profileSummary);
+  }
+  assertNoExternalTrafficOrErrors(signals);
+});
+
+test('benchmarks realistic high-cardinality relationship imports in Chromium', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  const signals = await preparePage(page);
+  const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
+  const scenarios = [
+    {
+      name: 'representative-medium',
+      followerCount: 5_000,
+      followingCount: 4_000,
+      mutualCount: 2_500,
+    },
+    {
+      name: 'high-cardinality',
+      followerCount: 30_000,
+      followingCount: 24_000,
+      mutualCount: 15_000,
+    },
+    {
+      name: 'largest-valid-near-limit',
+      followerCount: 114_000,
+      followingCount: 90_000,
+      mutualCount: 56_250,
+    },
+  ] as const;
+  const compressionVariants: ZipCompression[] =
+    process.env.FOLLOWLENS_CPU_PROFILE === '1'
+      ? ['deflate']
+      : ['deflate', 'store'];
+
+  for (const fixture of scenarios) {
+    for (const compression of compressionVariants) {
+      const archive = realisticArchive(
+        fixture.followerCount,
+        fixture.followingCount,
+        fixture.mutualCount,
+        compression,
+      );
+      expect(archive.entryUncompressedBytes).toHaveLength(2);
+      expect(
+        archive.entryUncompressedBytes.every((size) => size <= MAX_JSON_ENTRY),
+      ).toBe(true);
+      expect(archive.uncompressedBytes).toBeLessThanOrEqual(MAX_JSON_TOTAL);
+      expect(archive.compressedBytes).toBeLessThanOrEqual(MAX_COMPRESSED_TOTAL);
+
+      const scenario = `${fixture.name}-realistic-json-${compression}-zip-ui`;
+      await openImportDialog(
+        page,
+        dialog,
+        archive,
+        `synthetic-${fixture.name}-${compression}.zip`,
+      );
+      await measureInstrumentedImport(page, archive, scenario);
+
+      const profiled = await submitAndWaitForOutcome(page, dialog);
+      await expect(dialog).toBeHidden();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Importación lista.' }),
+      ).toBeVisible();
+      const measurements = await readBrowserMetrics(page, 'success');
+      const actualCounts = await assertDashboardCounts(page, archive.counts);
+      logMetrics(
+        scenario,
+        page,
+        archive,
+        measurements,
+        profiled.harnessObservedMs,
+        actualCounts,
+      );
+      logCpuProfile(scenario, profiled.profileSummary);
+    }
   }
   assertNoExternalTrafficOrErrors(signals);
 });
