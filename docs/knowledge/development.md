@@ -10,7 +10,7 @@ tags:
   - vinext
   - oxlint
   - verification
-timestamp: '2026-10-11T22:20:00-03:00'
+timestamp: '2026-10-12T00:58:00-03:00'
 lifecycle: stable
 ---
 
@@ -38,6 +38,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | `npm run benchmark:importer:stages` | Compara ZIP DEFLATE/STORE y tiempos por etapa en Chromium. | Playwright Test + Chromium | Dos repeticiones de mediano y 30 MiB; diagnósticos opt-in, sin umbrales. |
 | `npm run benchmark:importer:realistic` | Compara importaciones relacionales sintéticas de alta cardinalidad en Chromium. | Playwright Test + Chromium | Tres escalas, dos repeticiones y DEFLATE/STORE; opt-in, sin umbrales. |
 | `npm run benchmark:importer:optimization` | Compara el importador actual con un parser alternativo benchmark-only. | Playwright Test + Chromium | Tres repeticiones por variante y escala tras calentamiento; no CI. |
+| `npm run benchmark:importer:crc32` | Compara el CRC32 productivo con slicing-by-8 experimental. | Playwright Test + Chromium | Equivalencia previa, cinco corridas por entrada/escala; no CI. |
 | `npm run profile:importer:browser` | Perfila el hot path ZIP en Chromium mediante CDP. | Playwright + Chrome DevTools Protocol | Opt-in, 2 repeticiones por carga; no guarda perfiles crudos. |
 | `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.           |
 | `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.          |
@@ -273,6 +274,35 @@ La siguiente hipótesis mejor apoyada por evidencia es una alternativa aislada d
 - `npm run build`: pasó; Vinext mostró avisos existentes sobre el import JSON en `vite.config.ts` y clasificación estática de rutas.
 - `npx oxlint tests/perf/import-browser.benchmark.ts`: pasó sin hallazgos. `npm run lint` completo sigue fallando por hallazgos preexistentes documentados en la sección 4; no se encontraron hallazgos en el benchmark al ejecutarlo de forma aislada.
 - `git diff --check`: pasó.
+
+### Benchmark aislado de alternativas CRC32 (Fase 15)
+
+#### Metodología y límites del experimento
+
+Ejecutá `npm run benchmark:importer:crc32` con Chromium instalado. El comando selecciona únicamente la prueba de benchmark en `tests/perf/import-browser.benchmark.ts`; no está agregado a `npm test`, `npm run test:e2e` ni CI. Reutiliza el generador determinista de JSON relacional de la Fase 13 (mediano 5.000/4.000, alta cardinalidad 30.000/24.000, near-limit 114.000/90.000 seguidores/seguidos), crea ZIP DEFLATE sintéticos y extrae las mismas entradas mediante `readZipSelective` antes de iniciar los cronómetros. La extracción valida el CRC productivo contra el directorio central; el benchmark vuelve a contrastar cada implementación con el CRC central y con la implementación productiva.
+
+El candidato slicing-by-8 está aislado en `tests/perf/crc32-slicing-by-8.ts`, no lo importa `app/` y no cambia `lib/zip.ts`. Usa ocho tablas de 256 entradas precalculadas al cargar el módulo. Se verifican, antes de medir, el vector vacío, `123456789` (`0xCBF43926`), los 256 valores de byte, un JSON compacto, ocho buffers deterministas con `byteOffset` 3 y todos los residuos posibles módulo ocho, además de cada entrada realista extraída. Cada variante se calienta por buffer; luego se miden cinco pasadas intercaladas en orden alternante. El resultado de cada pasada se compara con el CRC esperado y se incorpora a un acumulador para mantener observable el cálculo. Se informa el tiempo individual, la mediana, el rango, el tamaño y los ns/byte. La inicialización de las ocho tablas candidatas se mide durante evaluación del módulo; el tiempo de inicialización de la tabla productiva se encuentra embebido en la carga de `lib/zip.ts` y no se aísla sin alterar producción.
+
+#### Resultados realmente medidos
+
+En Windows, Node.js 24.16.0, Playwright 1.64.0 y Chromium 156.0.8078.4, la corrida final registró inicialización de tablas candidatas en 1,0 ms y 8.192 B de tablas, frente a 1.024 B en la tabla productiva (7.168 B adicionales). Cada resultado coincidió con el CRC del directorio central ZIP. Las columnas de corridas y rango son milisegundos; cada variante tiene cinco corridas:
+
+| Escala / entrada | Bytes | CRC esperado | Producción (corridas; mediana; rango) | Slicing-by-8 (corridas; mediana; rango) |
+|---|---:|---|---|---|
+| Mediana `followers_1.json` | 725.001 | `0xA1891907` | 2,3 / 2,2 / 2,1 / 2,1 / 2,2; **2,2**; 0,2 | 2,1 / 2,2 / 4,0 / 2,2 / 2,4; **2,2**; 1,9 |
+| Mediana `following.json` | 652.029 | `0xBAC9B290` | 2,3 / 2,0 / 1,9 / 2,4 / 2,0; **2,0**; 0,5 | 1,9 / 2,2 / 2,1 / 3,7 / 2,2; **2,2**; 1,8 |
+| Alta `followers_1.json` | 4.350.001 | `0xF859C84D` | 13,6 / 12,8 / 12,6 / 12,6 / 13,0; **12,8**; 1,0 | 15,4 / 13,3 / 15,0 / 13,0 / 13,1; **13,3**; 2,4 |
+| Alta `following.json` | 3.912.029 | `0x8FB26261` | 11,8 / 12,4 / 11,4 / 11,3 / 11,3; **11,4**; 1,1 | 11,9 / 11,8 / 11,7 / 12,1 / 13,6; **11,9**; 1,9 |
+| Near-limit `followers_1.json` | 16.530.001 | `0x386A3D62` | 48,5 / 48,8 / 48,2 / 48,1 / 48,3; **48,3**; 0,7 | 56,3 / 54,2 / 52,4 / 54,0 / 52,8; **54,0**; 3,9 |
+| Near-limit `following.json` | 14.670.029 | `0x21A4EB97` | 43,8 / 44,4 / 44,4 / 43,1 / 43,7; **43,8**; 1,3 | 53,1 / 48,1 / 51,9 / 47,9 / 50,2; **50,2**; 5,2 |
+
+En near-limit, los bytes suman 31.200.030 (16.530.001 + 14.670.029). La suma de medianas del kernel fue 92,1 ms para producción y 104,2 ms para slicing-by-8; ambas entradas grandes dieron más tiempo para el candidato. La variación por entrada y orden/JIT fue mayor para el candidato en las cargas grandes. Por byte, las medianas near-limit fueron 2,92–2,99 ns/byte en producción y 3,27–3,42 ns/byte en slicing-by-8. En mediano y alta cardinalidad, los resultados fueron próximos y no favorables al candidato de forma consistente.
+
+La fase previa midió aproximadamente 90–101 ms de etapa CRC32 en el importador near-limit completo; el intervalo incluye solo la implementación productiva. Aplicar el ratio de kernel medido aquí como una **estimación hipotética**, no como integración observada, proyectaría entre 11,82 y 13,27 ms adicionales (ahorro negativo) sobre ese intervalo. El importador no ejecuta slicing-by-8. Las mediciones del kernel no incluyen lectura ZIP, descompresión, asignación, UI ni import total; el costo CRC observado previamente no debe sumarse a los tiempos independientes para inferir un total nuevo.
+
+**Decisión: C. Candidata descartada.** La equivalencia fue verificada, incluidos los checksums centrales de todos los fixtures, pero slicing-by-8 no mejoró consistentemente ni los buffers medianos ni los grandes; en near-limit sus medianas fueron aproximadamente 13% más lentas, agrega 7 KiB de tablas y presenta más variabilidad. No hay sustento para integrar la complejidad de ocho tablas. Se conserva `crc32` como única ruta de validación en producción; no se agregan otros algoritmos sin una hipótesis independiente y evidencia concreta.
+
+La salida de la prueba no incluye JSON ni listas de relaciones, perfiles crudos o datos personales. Se monitorearon errores de consola/página y tráfico de red durante toda la medición; no se observaron errores ni orígenes externos. `npm run benchmark:importer:crc32` pasó 1/1 test y verificó 29 vectores deterministas antes de medir los seis buffers (cinco corridas por variante y buffer). `npm test` pasó 34/34; `npm run test:e2e` pasó 4/4; `npm run typecheck` y `npm run build` pasaron. El linter focalizado en los dos archivos TypeScript pasó; `npm run lint` completo mantiene los hallazgos preexistentes de `components/ui/*`, `app/page.tsx`, `components/import-dialog.tsx`, `hooks/use-mobile.ts`, `lib/relationships.test.ts` y `components/ui/chart.tsx`. `git diff --check` pasó. Limitaciones: una única máquina/configuración Chromium, cinco muestras por buffer, posible ruido de JIT/scheduling, carga de tablas productiva no aislada y fixtures sintéticos compactos; los resultados no constituyen garantías ni extrapolan a todas las exportaciones.
 
 ---
 

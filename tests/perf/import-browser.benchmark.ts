@@ -50,6 +50,7 @@ type SyntheticArchive = {
   compressedBytes: number;
   uncompressedBytes: number;
   entryUncompressedBytes: number[];
+  entryCrc32: Record<string, number>;
   compression: ZipCompression;
   compressionMethod: 0 | 8;
   counts: RelationshipCounts;
@@ -155,6 +156,7 @@ function makeRelationshipZip(
     compressedBytes: metadata.compressedBytes,
     uncompressedBytes: followerBytes.byteLength + followingBytes.byteLength,
     entryUncompressedBytes: metadata.entryUncompressedBytes,
+    entryCrc32: metadata.entryCrc32,
     compression,
     compressionMethod: expectedMethod,
     counts: {
@@ -172,6 +174,7 @@ function inspectArchive(archive: Uint8Array): {
   entryUncompressedBytes: number[];
   relevantEntries: number;
   compressionMethods: number[];
+  entryCrc32: Record<string, number>;
 } {
   const view = new DataView(
     archive.buffer,
@@ -197,6 +200,7 @@ function inspectArchive(archive: Uint8Array): {
   const entryUncompressedBytes: number[] = [];
   let relevantEntries = 0;
   const compressionMethods: number[] = [];
+  const entryCrc32: Record<string, number> = {};
   while (cursor < centralEnd) {
     if (view.getUint32(cursor, true) !== 0x02014b50)
       throw new Error('Synthetic benchmark ZIP has an invalid central entry.');
@@ -214,6 +218,7 @@ function inspectArchive(archive: Uint8Array): {
       entryUncompressedBytes.push(uncompressedSize);
       relevantEntries += 1;
       compressionMethods.push(view.getUint16(cursor + 10, true));
+      entryCrc32[name] = view.getUint32(cursor + 16, true);
     }
     cursor += 46 + nameLength + extraLength + commentLength;
   }
@@ -225,6 +230,7 @@ function inspectArchive(archive: Uint8Array): {
     entryUncompressedBytes,
     relevantEntries,
     compressionMethods,
+    entryCrc32,
   };
 }
 
@@ -285,6 +291,7 @@ function makeBudgetZip(
     compressedBytes: metadata.compressedBytes,
     uncompressedBytes: metadata.uncompressedBytes,
     entryUncompressedBytes: metadata.entryUncompressedBytes,
+    entryCrc32: metadata.entryCrc32,
     compression,
     compressionMethod: expectedMethod,
     counts: { followers: 1, following: 0, mutuals, notBack: 0 },
@@ -473,6 +480,7 @@ function realisticArchive(
     compressedBytes: metadata.compressedBytes,
     uncompressedBytes: metadata.uncompressedBytes,
     entryUncompressedBytes: metadata.entryUncompressedBytes,
+    entryCrc32: metadata.entryCrc32,
     compression,
     compressionMethod: expectedMethod,
     counts: {
@@ -1567,6 +1575,314 @@ test('compares the current importer with the direct-set parser prototype', async
         }),
       );
   }
+  assertNoExternalTrafficOrErrors(signals);
+});
+
+test('benchmarks CRC32 slicing-by-8 against production reference', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  const signals = await preparePage(page);
+  const scenarios = [
+    {
+      name: 'representative-medium',
+      followerCount: 5_000,
+      followingCount: 4_000,
+      mutualCount: 2_500,
+    },
+    {
+      name: 'high-cardinality',
+      followerCount: 30_000,
+      followingCount: 24_000,
+      mutualCount: 15_000,
+    },
+    {
+      name: 'largest-valid-near-limit',
+      followerCount: 114_000,
+      followingCount: 90_000,
+      mutualCount: 56_250,
+    },
+  ] as const;
+  const entryMeasurements: Array<{
+    scenario: string;
+    entry: string;
+    bytes: number;
+    expectedCrc32: number;
+    productionMs: number[];
+    slicingBy8Ms: number[];
+    productionMedianMs: number;
+    slicingBy8MedianMs: number;
+    productionMedianNsPerByte: number;
+    slicingBy8MedianNsPerByte: number;
+    rangeMs: { production: number; slicingBy8: number };
+  }> = [];
+  let tableInitializationMs = 0;
+  let tableBytes = 0;
+
+  for (const fixture of scenarios) {
+    const archive = realisticArchive(
+      fixture.followerCount,
+      fixture.followingCount,
+      fixture.mutualCount,
+      'deflate',
+    );
+    await openImportDialog(
+      page,
+      page.getByRole('dialog', { name: 'Una nueva perspectiva' }),
+      archive,
+      `synthetic-crc32-${fixture.name}.zip`,
+    );
+
+    const result = await page.evaluate(
+      async ({ expectedCrcs, scenarioName }) => {
+        const file = document.querySelector<HTMLInputElement>(
+          'input[aria-label="Archivos de Instagram"]',
+        )?.files?.[0];
+        if (!file) throw new Error('Synthetic CRC benchmark file is missing.');
+        const zipUrl = new URL('/lib/zip.ts', location.origin).href;
+        const relationshipUrl = new URL(
+          '/lib/relationships.ts',
+          location.origin,
+        ).href;
+        const slicingUrl = new URL(
+          '/tests/perf/crc32-slicing-by-8.ts',
+          location.origin,
+        ).href;
+        const [
+          { crc32, readZipSelective },
+          { fileInfo },
+          { crc32SlicingBy8, tableBytes, tableInitializationMs },
+        ] = await Promise.all([
+          import(/* @vite-ignore */ zipUrl),
+          import(/* @vite-ignore */ relationshipUrl),
+          import(/* @vite-ignore */ slicingUrl),
+        ]);
+
+        const extracted = await readZipSelective(
+          file,
+          (path: string) => fileInfo(path) !== null,
+        );
+        const vectors: Array<{ name: string; bytes: Uint8Array }> = [
+          { name: 'empty', bytes: new Uint8Array(0) },
+          {
+            name: 'known-123456789',
+            bytes: new TextEncoder().encode('123456789'),
+          },
+          {
+            name: 'all-byte-values',
+            bytes: Uint8Array.from({ length: 256 }, (_, index) => index),
+          },
+        ];
+        for (let length = 1; length <= 17; length++) {
+          const backing = Uint8Array.from(
+            { length: length + 4 },
+            (_, index) => (index * 73 + length * 19) & 0xff,
+          );
+          vectors.push({
+            name: `small-offset-length-${length}`,
+            bytes: backing.subarray(2, 2 + length),
+          });
+        }
+        for (let remainder = 0; remainder < 8; remainder++) {
+          const backing = new Uint8Array(3 + 65_536 + remainder + 4);
+          let state = (0x9e3779b9 ^ remainder) >>> 0;
+          for (let index = 0; index < backing.length; index++) {
+            state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+            backing[index] = state >>> 24;
+          }
+          vectors.push({
+            name: `offset-3-length-residue-${remainder}`,
+            bytes: backing.subarray(3, 3 + 65_536 + remainder),
+          });
+        }
+        const compactJson = new TextEncoder().encode(
+          JSON.stringify({
+            relationships_following: [
+              {
+                title: 'synthetic_alpha',
+                string_list_data: [{ value: 'synthetic_alpha', timestamp: 1 }],
+              },
+              {
+                title: 'synthetic_beta',
+                string_list_data: [{ value: 'synthetic_beta', timestamp: 2 }],
+              },
+            ],
+          }),
+        );
+        vectors.push({ name: 'compact-json', bytes: compactJson });
+
+        for (const vector of vectors) {
+          const expected = crc32(vector.bytes);
+          const candidate = crc32SlicingBy8(vector.bytes);
+          if (vector.name === 'known-123456789' && expected !== 0xcbf43926)
+            throw new Error(
+              'Production CRC32 failed the standard known vector.',
+            );
+          if (candidate !== expected)
+            throw new Error(`CRC32 equivalence failed for ${vector.name}.`);
+        }
+
+        const median = (values: number[]) => {
+          const sorted = [...values].sort((left, right) => left - right);
+          return sorted[Math.floor(sorted.length / 2)]!;
+        };
+        const output: Array<{
+          scenario: string;
+          entry: string;
+          bytes: number;
+          expectedCrc32: number;
+          productionMs: number[];
+          slicingBy8Ms: number[];
+          productionMedianMs: number;
+          slicingBy8MedianMs: number;
+          productionMedianNsPerByte: number;
+          slicingBy8MedianNsPerByte: number;
+          rangeMs: { production: number; slicingBy8: number };
+        }> = [];
+        let checksumSink = 0;
+
+        for (const [path, bytes] of Object.entries(
+          extracted as Record<string, Uint8Array>,
+        ).sort(([a], [b]) => a.localeCompare(b))) {
+          const expectedCrc32 = expectedCrcs[path];
+          if (expectedCrc32 === undefined)
+            throw new Error('Central-directory CRC metadata is missing.');
+          const expected = crc32(bytes);
+          if (expected !== expectedCrc32)
+            throw new Error(
+              'Production CRC differs from the ZIP central directory.',
+            );
+
+          const warmUp = [crc32, crc32SlicingBy8];
+          for (const calculate of warmUp) {
+            if (calculate(bytes) !== expectedCrc32)
+              throw new Error('CRC warm-up result differs from ZIP metadata.');
+          }
+
+          const productionMs: number[] = [];
+          const slicingBy8Ms: number[] = [];
+          for (let repetition = 0; repetition < 5; repetition++) {
+            const order =
+              repetition % 2 === 0
+                ? ([
+                    ['production', crc32, productionMs],
+                    ['slicing-by-8', crc32SlicingBy8, slicingBy8Ms],
+                  ] as const)
+                : ([
+                    ['slicing-by-8', crc32SlicingBy8, slicingBy8Ms],
+                    ['production', crc32, productionMs],
+                  ] as const);
+            for (const [, calculate, timings] of order) {
+              const startedAt = performance.now();
+              const actual = calculate(bytes);
+              const elapsedMs = performance.now() - startedAt;
+              if (actual !== expectedCrc32)
+                throw new Error('Measured CRC differs from ZIP metadata.');
+              checksumSink = (checksumSink ^ actual) >>> 0;
+              timings.push(elapsedMs);
+            }
+          }
+
+          const productionMedianMs = median(productionMs);
+          const slicingBy8MedianMs = median(slicingBy8Ms);
+          output.push({
+            scenario: scenarioName,
+            entry: path.split('/').pop()!,
+            bytes: bytes.byteLength,
+            expectedCrc32,
+            productionMs: productionMs.map((value) => Number(value.toFixed(3))),
+            slicingBy8Ms: slicingBy8Ms.map((value) => Number(value.toFixed(3))),
+            productionMedianMs: Number(productionMedianMs.toFixed(3)),
+            slicingBy8MedianMs: Number(slicingBy8MedianMs.toFixed(3)),
+            productionMedianNsPerByte: Number(
+              ((productionMedianMs * 1_000_000) / bytes.byteLength).toFixed(2),
+            ),
+            slicingBy8MedianNsPerByte: Number(
+              ((slicingBy8MedianMs * 1_000_000) / bytes.byteLength).toFixed(2),
+            ),
+            rangeMs: {
+              production: Number(
+                (Math.max(...productionMs) - Math.min(...productionMs)).toFixed(
+                  3,
+                ),
+              ),
+              slicingBy8: Number(
+                (Math.max(...slicingBy8Ms) - Math.min(...slicingBy8Ms)).toFixed(
+                  3,
+                ),
+              ),
+            },
+          });
+        }
+
+        return {
+          tableInitializationMs,
+          tableBytes,
+          equivalenceVectors: vectors.length,
+          checksumSink,
+          entries: output,
+        };
+      },
+      {
+        expectedCrcs: archive.entryCrc32,
+        scenarioName: fixture.name,
+      },
+    );
+    tableInitializationMs ||= result.tableInitializationMs;
+    tableBytes ||= result.tableBytes;
+    expect(result.equivalenceVectors).toBe(29);
+    expect(result.entries).toHaveLength(2);
+    expect(result.checksumSink).toBeGreaterThanOrEqual(0);
+    entryMeasurements.push(...result.entries);
+  }
+
+  const nearLimit = entryMeasurements.filter(
+    (measurement) => measurement.scenario === 'largest-valid-near-limit',
+  );
+  const productionNearLimitMs = nearLimit.reduce(
+    (total, entry) => total + entry.productionMedianMs,
+    0,
+  );
+  const slicingNearLimitMs = nearLimit.reduce(
+    (total, entry) => total + entry.slicingBy8MedianMs,
+    0,
+  );
+  const measuredSpeedup = productionNearLimitMs / slicingNearLimitMs;
+  const priorImporterCrcStageMs = { min: 90, max: 101 };
+  const theoreticalSavings = [
+    priorImporterCrcStageMs.min * (1 - 1 / measuredSpeedup),
+    priorImporterCrcStageMs.max * (1 - 1 / measuredSpeedup),
+  ];
+  const theoreticalImportSavingsMs = {
+    min: Number(Math.min(...theoreticalSavings).toFixed(2)),
+    max: Number(Math.max(...theoreticalSavings).toFixed(2)),
+  };
+
+  console.log(
+    JSON.stringify({
+      scenario: 'crc32-slicing-by-8-alternative',
+      syntheticOnly: true,
+      nodeVersion: process.version,
+      chromiumVersion: page.context().browser()?.version() ?? 'unknown',
+      tableInitializationMs: Number(tableInitializationMs.toFixed(3)),
+      candidateTableBytes: tableBytes,
+      productionTableBytes: 256 * Uint32Array.BYTES_PER_ELEMENT,
+      initializationNote:
+        'Candidate table time is captured during module evaluation; production table initialization is not independently observable without changing production code.',
+      entryMeasurements,
+      nearLimitStandaloneKernelMedianMs: {
+        production: Number(productionNearLimitMs.toFixed(3)),
+        slicingBy8: Number(slicingNearLimitMs.toFixed(3)),
+      },
+      priorObservedImporterCrcStageMs: priorImporterCrcStageMs,
+      theoreticalImportSavingsMs,
+      theoreticalSavingsNote:
+        'Estimate only: applies the standalone kernel speed ratio to the prior observed 90-101 ms production CRC stage; the real importer still uses only the production algorithm.',
+      repeatCountPerVariantAndEntry: 5,
+      fixtureCompression: 'deflate',
+      expectedCrcSource: 'ZIP central directory',
+    }),
+  );
   assertNoExternalTrafficOrErrors(signals);
 });
 
