@@ -49,6 +49,7 @@ workerScope.addEventListener(
 
     try {
       const result = await importFiles([file]);
+      const importMs = performance.now() - startedAt;
       let analysis: ReturnType<typeof analyze> | undefined;
       let analysisMs: number | undefined;
       if (snapshot) {
@@ -61,7 +62,7 @@ workerScope.addEventListener(
         ok: true,
         result,
         ...(analysis ? { analysis } : {}),
-        importMs: performance.now() - startedAt,
+        importMs,
         ...(analysisMs !== undefined ? { analysisMs } : {}),
         workerHeapBeforeBytes,
         workerHeapAfterBytes: workerHeap(),
