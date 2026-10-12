@@ -352,7 +352,8 @@ export default function Home() {
       : undefined;
   const data = useMemo(() => {
     if (!current) return null;
-    if (importAnalysis?.snapshotId === current.id) return importAnalysis.data;
+    if (importAnalysis?.snapshotId === current.id && !previous)
+      return importAnalysis.data;
     return analyze(current, previous, onAnalysisMeasured);
   }, [current, previous, importAnalysis, onAnalysisMeasured]);
   const followingSet = useMemo(() => new Set(current?.following), [current]);
