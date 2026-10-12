@@ -238,6 +238,10 @@ function Trend({ snapshots }: { snapshots: Snapshot[] }) {
 export default function Home() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]),
     [savedIds, setSavedIds] = useState<string[]>([]),
+    [importAnalysis, setImportAnalysis] = useState<{
+      snapshotId: string;
+      data: Record<Group, string[]>;
+    } | null>(null),
     [ready, setReady] = useState(false),
     [demo, setDemo] = useState(false),
     [account, setAccount] = useState(''),
@@ -291,11 +295,38 @@ export default function Home() {
   const current = history.find((s) => s.id === selected) ?? history.at(-1);
   const earlier = history.filter((s) => current && s.date < current.date);
   const previous = earlier.find((s) => s.id === baseline) ?? earlier.at(-1);
-  const data = useMemo(
-    () => (current ? analyze(current, previous) : null),
-    [current, previous],
-  );
+  const onAnalysisMeasured =
+    import.meta.env.DEV && typeof window !== 'undefined'
+      ? window.__followLensWorkerE2E?.recordAnalysisDuration
+      : undefined;
+  const data = useMemo(() => {
+    if (!current) return null;
+    if (importAnalysis?.snapshotId === current.id) return importAnalysis.data;
+    return analyze(current, previous, onAnalysisMeasured);
+  }, [current, previous, importAnalysis, onAnalysisMeasured]);
   const followingSet = useMemo(() => new Set(current?.following), [current]);
+  useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return;
+    const benchmark = window.__followLensWorkerE2E;
+    if (!benchmark) return;
+    benchmark.resetDashboard = () => {
+      setSnapshots([]);
+      setSavedIds([]);
+      setImportAnalysis(null);
+      setAccount('');
+      setSelected('');
+      setBaseline('');
+      setDemo(false);
+      setView('overview');
+      setPage(0);
+      setNotice('');
+      setError('');
+      benchmark.operationStartedAt = null;
+      benchmark.dashboardPresentedAt = null;
+      benchmark.lastDashboard = null;
+      benchmark.pipelineMetrics = null;
+    };
+  }, []);
   useEffect(() => {
     if (!previous && changeGroups.includes(group)) setGroup('notBack');
   }, [previous, group]);
@@ -325,7 +356,11 @@ export default function Home() {
     setPage(0);
     setDetail(null);
   }
-  async function importSnapshot(s: Snapshot, persist: boolean) {
+  async function importSnapshot(
+    s: Snapshot,
+    persist: boolean,
+    analysis?: Record<Group, string[]>,
+  ) {
     if (
       snapshots.some((old) => old.account === s.account && old.date === s.date)
     )
@@ -337,6 +372,7 @@ export default function Home() {
       setSavedIds((ids) => [...ids, s.id]);
     }
     setSnapshots((old) => [...old, s]);
+    setImportAnalysis(analysis ? { snapshotId: s.id, data: analysis } : null);
     setDemo(false);
     setAccount(s.account);
     setSelected(s.id);
@@ -350,6 +386,20 @@ export default function Home() {
     );
     setError('');
   }
+  useEffect(() => {
+    if (
+      !import.meta.env.DEV ||
+      typeof window === 'undefined' ||
+      !current ||
+      !data
+    )
+      return;
+    const benchmark = window.__followLensWorkerE2E;
+    if (benchmark && benchmark.operationStartedAt !== null) {
+      benchmark.lastDashboard = { snapshot: current, data };
+      benchmark.dashboardPresentedAt = performance.now();
+    }
+  }, [current, data]);
   async function erase() {
     if (!remove) return;
     setBusy(true);
@@ -1049,6 +1099,11 @@ export default function Home() {
           onOpenChange={setImportOpen}
           onImport={importSnapshot}
           account={demo ? '' : actualAccount}
+          processFiles={
+            import.meta.env.DEV && typeof window !== 'undefined'
+              ? window.__followLensWorkerE2E?.processFiles
+              : undefined
+          }
         />
       )}
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>

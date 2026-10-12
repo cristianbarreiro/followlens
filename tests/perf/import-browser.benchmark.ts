@@ -6,6 +6,7 @@ import {
   MAX_JSON_ENTRY,
   MAX_JSON_TOTAL,
 } from '../../lib/zip.ts';
+import type { Group } from '../../lib/relationships.ts';
 
 const appAddress = new URL('http://localhost:4173');
 const importDate = '2020-01-02';
@@ -241,7 +242,8 @@ function makeBudgetZip(
   const followersBase = JSON.stringify([record('scale_follower')]);
   const followingJson = JSON.stringify({ relationships_following: [] });
   const followingBytes = strToU8(followingJson);
-  const followerTargetBytes = totalUncompressedBytes - followingBytes.byteLength;
+  const followerTargetBytes =
+    totalUncompressedBytes - followingBytes.byteLength;
   const followerBaseBytes = strToU8(followersBase);
   if (
     followerTargetBytes < followerBaseBytes.byteLength ||
@@ -264,7 +266,9 @@ function makeBudgetZip(
     !('relationships_following' in parsedFollowing) ||
     !Array.isArray(parsedFollowing.relationships_following)
   ) {
-    throw new Error('Synthetic budget payload does not match importer schemas.');
+    throw new Error(
+      'Synthetic budget payload does not match importer schemas.',
+    );
   }
 
   const archive = zipSync(
@@ -320,7 +324,9 @@ function mediumArchive(compression: ZipCompression): SyntheticArchive {
     archive.counts.mutuals !== mutualCount ||
     archive.counts.notBack !== followingCount - mutualCount
   ) {
-    throw new Error('Synthetic medium fixture relationship counts are invalid.');
+    throw new Error(
+      'Synthetic medium fixture relationship counts are invalid.',
+    );
   }
   return archive;
 }
@@ -528,10 +534,8 @@ async function measureInstrumentedImport(
     if (!file) throw new Error('Synthetic benchmark file is not selected.');
 
     const importerUrl = new URL('/lib/importer.ts', location.origin).href;
-    const relationshipsUrl = new URL(
-      '/lib/relationships.ts',
-      location.origin,
-    ).href;
+    const relationshipsUrl = new URL('/lib/relationships.ts', location.origin)
+      .href;
     const { importFiles } = await import(/* @vite-ignore */ importerUrl);
     const { analyze } = await import(/* @vite-ignore */ relationshipsUrl);
     const measurements: {
@@ -619,8 +623,7 @@ async function measureInstrumentedImport(
           },
         ]),
       ),
-      note:
-        'Stage clocks run in Chromium; instrumentation and callbacks add overhead. Overlapping measurements (DEFLATE and output collection) must not be summed.',
+      note: 'Stage clocks run in Chromium; instrumentation and callbacks add overhead. Overlapping measurements (DEFLATE and output collection) must not be summed.',
     }),
   );
 }
@@ -747,11 +750,12 @@ async function readBrowserMetrics(
         task.startTime >= state.startedAt! &&
         task.startTime <= state.finishedAt!,
     );
-    const memoryAfterBytes = (
-      performance as Performance & {
-        memory?: { usedJSHeapSize: number };
-      }
-    ).memory?.usedJSHeapSize ?? null;
+    const memoryAfterBytes =
+      (
+        performance as Performance & {
+          memory?: { usedJSHeapSize: number };
+        }
+      ).memory?.usedJSHeapSize ?? null;
     return {
       outcome: state.outcome,
       appElapsedMs: Number((state.finishedAt - state.startedAt).toFixed(2)),
@@ -806,7 +810,9 @@ function summarizeCpuProfile(profile: CpuProfile) {
     const parent = nodesById.get(parentById.get(node.id) ?? -1);
     if (!parent) continue;
     const callers = callersByFrame.get(frameKey(node)) ?? new Set<string>();
-    callers.add(`${parent.callFrame.functionName || '(anonymous)'} ${sourcePath(parent)}`);
+    callers.add(
+      `${parent.callFrame.functionName || '(anonymous)'} ${sourcePath(parent)}`,
+    );
     callersByFrame.set(frameKey(node), callers);
   }
 
@@ -844,14 +850,16 @@ function summarizeCpuProfile(profile: CpuProfile) {
 
   const allRows = [...rows.values()];
   const topSelfRows = allRows.filter((row) => row.selfMs > 0);
-  const targets = allRows.filter((row) =>
-    (row.selfMs > 0 || row.inclusiveMs > 0) &&
+  const targets = allRows.filter(
+    (row) =>
+      (row.selfMs > 0 || row.inclusiveMs > 0) &&
       /readZipSelective|decompressDeflate|crc32|strFromU8|parseRelationships|normalize|analyze|JSON\.parse|inflt|inflate|cbuf|slc|decode|sort/i.test(
         row.functionName,
       ),
   );
   return {
-    profiler: 'Chrome DevTools Protocol Profiler; sampled CPU time from timeDeltas',
+    profiler:
+      'Chrome DevTools Protocol Profiler; sampled CPU time from timeDeltas',
     sampleCount: profile.samples?.length ?? 0,
     sampledProfileMs: Number(sampledCpuMs.toFixed(2)),
     note: 'Self time is exclusive sampled time; inclusive time includes descendants. Percentages use the full sampled profile interval, including idle and harness scheduling, and inclusive values must not be added to self totals.',
@@ -860,9 +868,11 @@ function summarizeCpuProfile(profile: CpuProfile) {
       .slice(0, 30)
       .map((row) => ({
         ...row,
-        callers: [...(callersByFrame.get(
+        callers: [
+          ...(callersByFrame.get(
             `${row.functionName === '(anonymous)' ? '' : row.functionName}|${row.source}|${row.line}`,
-        ) ?? [])].slice(0, 5),
+          ) ?? []),
+        ].slice(0, 5),
         selfMs: Number(row.selfMs.toFixed(2)),
         inclusiveMs: Number(row.inclusiveMs.toFixed(2)),
         selfProfileIntervalPercent:
@@ -888,7 +898,10 @@ function summarizeCpuProfile(profile: CpuProfile) {
 async function withOptionalCpuProfile<T>(
   page: Page,
   action: () => Promise<T>,
-): Promise<{ result: T; profileSummary: ReturnType<typeof summarizeCpuProfile> | null }> {
+): Promise<{
+  result: T;
+  profileSummary: ReturnType<typeof summarizeCpuProfile> | null;
+}> {
   if (process.env.FOLLOWLENS_CPU_PROFILE !== '1')
     return { result: await action(), profileSummary: null };
 
@@ -922,7 +935,10 @@ async function beginImport(dialog: Locator): Promise<number> {
 async function submitAndWaitForOutcome(
   page: Page,
   dialog: Locator,
-): Promise<{ harnessObservedMs: number; profileSummary: ReturnType<typeof summarizeCpuProfile> | null }> {
+): Promise<{
+  harnessObservedMs: number;
+  profileSummary: ReturnType<typeof summarizeCpuProfile> | null;
+}> {
   const submitButton = dialog.getByRole('button', {
     name: 'Analizar importación',
   });
@@ -1039,8 +1055,7 @@ async function assertDashboardCounts(
     : '0 cuentas';
   const footer = list.locator('.table-footer > span');
   await expect(footer).toHaveText(footerText);
-  const parseCount = (value: string) =>
-    Number(value.replace(/[^\d]/g, ''));
+  const parseCount = (value: string) => Number(value.replace(/[^\d]/g, ''));
   const footerCount =
     /de ([\d.]+) cuentas/.exec(await footer.innerText())?.[1] ?? '0';
   return {
@@ -1227,12 +1242,12 @@ test('compares the current importer with the direct-set parser prototype', async
 
       const importerUrl = new URL('/lib/importer.ts', location.origin).href;
       const zipUrl = new URL('/lib/zip.ts', location.origin).href;
-      const relationshipsUrl = new URL(
-        '/lib/relationships.ts',
+      const relationshipsUrl = new URL('/lib/relationships.ts', location.origin)
+        .href;
+      const fflateUrl = new URL(
+        '/node_modules/fflate/esm/browser.js',
         location.origin,
       ).href;
-      const fflateUrl = new URL('/node_modules/fflate/esm/browser.js', location.origin)
-        .href;
       const [
         { importFiles },
         { readZipSelective },
@@ -1349,9 +1364,8 @@ test('compares the current importer with the direct-set parser prototype', async
         stages: Record<string, number>;
       }> => {
         const stages: Measurement[] = [];
-        const imported = await importFiles(
-          [file],
-          (measurement: Measurement) => stages.push(measurement),
+        const imported = await importFiles([file], (measurement: Measurement) =>
+          stages.push(measurement),
         );
         return { imported, stages: aggregate(stages) };
       };
@@ -1446,7 +1460,9 @@ test('compares the current importer with the direct-set parser prototype', async
         left.fileCount === right.fileCount &&
         left.followers.length === right.followers.length &&
         left.following.length === right.following.length &&
-        left.followers.every((name, index) => name === right.followers[index]) &&
+        left.followers.every(
+          (name, index) => name === right.followers[index],
+        ) &&
         left.following.every((name, index) => name === right.following[index]);
       const counts = (imported: Imported) => {
         const followingSet = new Set(imported.following);
@@ -1467,7 +1483,9 @@ test('compares the current importer with the direct-set parser prototype', async
           actual.mutuals !== expectedCounts.mutuals ||
           actual.notBack !== expectedCounts.notBack
         ) {
-          throw new Error('Importer variant returned unexpected relationship counts.');
+          throw new Error(
+            'Importer variant returned unexpected relationship counts.',
+          );
         }
       };
       const trials: Trial[] = [];
@@ -1570,8 +1588,7 @@ test('compares the current importer with the direct-set parser prototype', async
           actualCounts: trial.counts,
           ...trial,
           trialCountPerVariant: 3,
-          note:
-            'Import wall time and long tasks are measured inside Chromium; fixture construction is outside the timed interval. The prototype is benchmark-only and reuses the production ZIP reader, output limits, and CRC32.',
+          note: 'Import wall time and long tasks are measured inside Chromium; fixture construction is outside the timed interval. The prototype is benchmark-only and reuses the production ZIP reader, output limits, and CRC32.',
         }),
       );
   }
@@ -2552,6 +2569,665 @@ test('benchmarks importer worker responsiveness against main-thread import', asy
     );
   }
   expect(measurements).toHaveLength(45);
+  assertNoExternalTrafficOrErrors(signals);
+});
+
+test('benchmarks end-to-end Worker import, analysis, and React dashboard responsiveness', async ({
+  page,
+}) => {
+  test.setTimeout(1_200_000);
+  const signals = await preparePage(page);
+  await page.addInitScript(() => {
+    const frameTimes: number[] = [];
+    const trackFrame = (time: number) => {
+      frameTimes.push(time);
+      if (frameTimes.length > 12_000) frameTimes.shift();
+      requestAnimationFrame(trackFrame);
+    };
+    requestAnimationFrame(trackFrame);
+
+    type WorkerSuccess = {
+      operationId: string;
+      ok: true;
+      result: {
+        followers: string[];
+        following: string[];
+        fileCount: number;
+      };
+      analysis?: Record<Group, string[]>;
+      importMs: number;
+      analysisMs?: number;
+    };
+    type WorkerFailure = {
+      operationId: string;
+      ok: false;
+      error: string;
+    };
+    type WorkerResponse = { type: 'ready' } | WorkerSuccess | WorkerFailure;
+    type WorkerClient = {
+      worker: Worker;
+      readyMs: number;
+      request: (
+        file: File,
+        snapshot: {
+          id: string;
+          account: string;
+          date: string;
+          importedAt: string;
+        },
+      ) => Promise<{
+        response: WorkerSuccess | WorkerFailure;
+        roundTripMs: number;
+        postMessageCallMs: number;
+      }>;
+      close: () => void;
+    };
+
+    let warmWorker: WorkerClient | null = null;
+    const bridge: NonNullable<Window['__followLensWorkerE2E']> = {
+      mode: 'main-thread',
+      operationStartedAt: null,
+      dashboardPresentedAt: null,
+      analysisMs: null,
+      recordAnalysisDuration: (durationMs) => {
+        if (bridge.operationStartedAt !== null) bridge.analysisMs = durationMs;
+      },
+      pipelineMetrics: null,
+      interactionProbeAt: null,
+      memoryBeforeBytes: null,
+      frameTimes,
+      lastDashboard: null,
+      referenceDashboard: null,
+      warmWorkerReadyMs: null,
+      terminatedWorkers: 0,
+      resetDashboard: null,
+      closeWorkers: () => {
+        warmWorker?.close();
+        warmWorker = null;
+      },
+      processFiles: async (files, snapshot) => {
+        const file = files[0];
+        if (!file) throw new Error('Benchmark selected no synthetic input.');
+        if (bridge.mode === 'main-thread') {
+          const importer = await import(
+            /* @vite-ignore */ new URL('/lib/importer.ts', location.origin).href
+          );
+          const startedAt = performance.now();
+          const imported = await importer.importFiles(files);
+          return {
+            imported,
+            metrics: {
+              mode: 'main-thread',
+              importMs: performance.now() - startedAt,
+              analysisMs: null,
+              workerReadyMs: null,
+              roundTripMs: null,
+              postMessageCallMs: null,
+            },
+          };
+        }
+
+        const cold = bridge.mode === 'worker-cold';
+        const workerUrl = new URL(
+          '/tests/perf/importer.worker.ts',
+          location.origin,
+        ).href;
+        const createWorker = async (): Promise<WorkerClient> => {
+          const creationStartedAt = performance.now();
+          const worker = new Worker(workerUrl, { type: 'module' });
+          let readyResolve: (() => void) | null = null;
+          let readyReject: ((error: Error) => void) | null = null;
+          let readyTimeoutId = 0;
+          let pending:
+            | {
+                resolve: (response: WorkerSuccess | WorkerFailure) => void;
+                reject: (error: Error) => void;
+                timeoutId: number;
+              }
+            | undefined;
+          let closed = false;
+          const ready = new Promise<void>((resolve, reject) => {
+            readyResolve = resolve;
+            readyReject = reject;
+            readyTimeoutId = window.setTimeout(
+              () => reject(new Error('Benchmark Worker startup timed out.')),
+              30_000,
+            );
+          });
+          const fail = (error: Error) => {
+            readyReject?.(error);
+            if (pending) {
+              window.clearTimeout(pending.timeoutId);
+              pending.reject(error);
+              pending = undefined;
+            }
+          };
+          worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+            const response = event.data;
+            if ('type' in response && response.type === 'ready') {
+              window.clearTimeout(readyTimeoutId);
+              readyResolve?.();
+              return;
+            }
+            if (!pending || !('operationId' in response)) return;
+            const request = pending;
+            pending = undefined;
+            window.clearTimeout(request.timeoutId);
+            request.resolve(response);
+          };
+          worker.onerror = (event) => {
+            event.preventDefault();
+            fail(new Error('Benchmark Worker failed unexpectedly.'));
+          };
+          worker.onmessageerror = () =>
+            fail(new Error('Benchmark Worker response was unreadable.'));
+          try {
+            await ready;
+          } catch (error) {
+            worker.terminate();
+            bridge.terminatedWorkers += 1;
+            throw error;
+          }
+          const readyMs = performance.now() - creationStartedAt;
+          const client: WorkerClient = {
+            worker,
+            readyMs,
+            request: (selectedFile, selectedSnapshot) => {
+              if (closed)
+                return Promise.reject(
+                  new Error('Benchmark Worker was already terminated.'),
+                );
+              const startedAt = performance.now();
+              let postMessageCallMs = 0;
+              return new Promise<WorkerSuccess | WorkerFailure>(
+                (resolve, reject) => {
+                  const timeoutId = window.setTimeout(() => {
+                    const error = new Error(
+                      'Benchmark Worker did not respond to its request.',
+                    );
+                    fail(error);
+                    client.close();
+                  }, 120_000);
+                  pending = { resolve, reject, timeoutId };
+                  const postStartedAt = performance.now();
+                  try {
+                    worker.postMessage({
+                      operationId: crypto.randomUUID(),
+                      file: selectedFile,
+                      snapshot: selectedSnapshot,
+                    });
+                    postMessageCallMs = performance.now() - postStartedAt;
+                  } catch (error) {
+                    window.clearTimeout(timeoutId);
+                    pending = undefined;
+                    reject(
+                      error instanceof Error
+                        ? error
+                        : new Error('Could not send the benchmark input.'),
+                    );
+                    return;
+                  }
+                },
+              ).then((response) => ({
+                response,
+                roundTripMs: performance.now() - startedAt,
+                postMessageCallMs,
+              }));
+            },
+            close: () => {
+              if (closed) return;
+              closed = true;
+              if (pending) {
+                window.clearTimeout(pending.timeoutId);
+                pending.reject(new Error('Benchmark Worker terminated.'));
+                pending = undefined;
+              }
+              worker.terminate();
+              bridge.terminatedWorkers += 1;
+              if (warmWorker === client) warmWorker = null;
+            },
+          };
+          return client;
+        };
+
+        let client: WorkerClient;
+        let created = false;
+        if (cold) {
+          client = await createWorker();
+          created = true;
+        } else if (!warmWorker) {
+          warmWorker = await createWorker();
+          bridge.warmWorkerReadyMs = warmWorker.readyMs;
+          client = warmWorker;
+          created = true;
+        } else {
+          client = warmWorker;
+        }
+        try {
+          const exchange = await client.request(file, snapshot);
+          if (!exchange.response.ok) throw new Error(exchange.response.error);
+          if (!exchange.response.analysis)
+            throw new Error('Benchmark Worker omitted relationship analysis.');
+          return {
+            imported: exchange.response.result,
+            analysis: exchange.response.analysis,
+            metrics: {
+              mode: cold ? 'worker-cold' : 'worker-warm',
+              importMs: exchange.response.importMs,
+              analysisMs: exchange.response.analysisMs ?? null,
+              workerReadyMs: cold ? client.readyMs : null,
+              roundTripMs: exchange.roundTripMs,
+              postMessageCallMs: exchange.postMessageCallMs,
+            },
+          };
+        } finally {
+          if (cold && created) client.close();
+        }
+      },
+    };
+    bridge.closeWorkers = () => {
+      warmWorker?.close();
+      warmWorker = null;
+    };
+    window.__followLensWorkerE2E = bridge;
+  });
+
+  const scenarios = [
+    {
+      name: 'medium',
+      followerCount: 5_000,
+      followingCount: 4_000,
+      mutualCount: 2_500,
+    },
+    {
+      name: 'high-cardinality',
+      followerCount: 30_000,
+      followingCount: 24_000,
+      mutualCount: 15_000,
+    },
+    {
+      name: 'near-limit',
+      followerCount: 114_000,
+      followingCount: 90_000,
+      mutualCount: 56_250,
+    },
+  ] as const;
+  const oversizedArchive = makeBudgetZip(MAX_JSON_TOTAL + 1);
+  const allMeasurements: Array<Record<string, unknown>> = [];
+
+  for (const [scenarioIndex, fixture] of scenarios.entries()) {
+    const archive = realisticArchive(
+      fixture.followerCount,
+      fixture.followingCount,
+      fixture.mutualCount,
+      'deflate',
+    );
+    const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
+    const choose = async (
+      filename: string,
+      file: { buffer: Buffer },
+      account: string,
+    ) => {
+      const input = dialog.getByLabel('Archivos de Instagram');
+      await input.setInputFiles({
+        name: filename,
+        mimeType: 'application/zip',
+        buffer: file.buffer,
+      });
+      await expect(dialog.getByText(filename, { exact: true })).toBeVisible();
+      await dialog.getByLabel('Tu usuario').fill(account);
+      await dialog.getByLabel('Fecha de la exportación').fill(importDate);
+      if (!(await dialog.getByRole('checkbox').first().isChecked()))
+        await dialog.getByRole('checkbox').first().check();
+      await page.evaluate(() => {
+        const bridge = window.__followLensWorkerE2E;
+        if (!bridge)
+          throw new Error('Benchmark instrumentation is missing.');
+        const probe = document.createElement('button');
+        probe.type = 'button';
+        probe.textContent = 'Responsiveness probe';
+        probe.setAttribute('aria-label', 'Benchmark interaction probe');
+        probe.style.cssText =
+          'position:fixed;right:12px;bottom:12px;z-index:2147483647;padding:8px;background:#fff;color:#111;border:1px solid #333';
+        probe.addEventListener('click', () => {
+          bridge.interactionProbeAt = performance.now();
+        });
+        document.body.appendChild(probe);
+      });
+    };
+    const submitAndMeasure = async (mode: string) => {
+      await page.evaluate((selectedMode) => {
+        const bridge = window.__followLensWorkerE2E;
+        if (!bridge)
+          throw new Error('Benchmark instrumentation is unavailable.');
+        bridge.mode = selectedMode as typeof bridge.mode;
+        bridge.interactionProbeAt = null;
+        bridge.memoryBeforeBytes =
+          (
+            performance as Performance & {
+              memory?: { usedJSHeapSize: number };
+            }
+          ).memory?.usedJSHeapSize ?? null;
+      }, mode);
+      const operationHarnessStart = nodePerformance.now();
+      await dialog.getByRole('button', { name: 'Analizar importación' }).click();
+      const interactionPromise = (async () => {
+        await page.waitForTimeout(20);
+        const clickStartedAt = nodePerformance.now();
+        await page
+          .getByRole('button', { name: 'Benchmark interaction probe' })
+          .click({ timeout: 5_000 });
+        await page.evaluate(() => {
+          document
+            .querySelector('[aria-label="Benchmark interaction probe"]')
+            ?.remove();
+        });
+        return nodePerformance.now() - clickStartedAt;
+      })();
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Importación lista.' }),
+      ).toBeVisible({ timeout: 30_000 });
+      await page.waitForFunction(
+        () => {
+          const bridge = window.__followLensWorkerE2E;
+          return Boolean(
+            bridge?.lastDashboard &&
+              bridge.dashboardPresentedAt !== null,
+          );
+        },
+      );
+      const interactionClickMs = await interactionPromise;
+      const actualCounts = await assertDashboardCounts(page, archive.counts);
+      expect(actualCounts).toEqual(archive.counts);
+      const browserMetrics = await page.evaluate(() => {
+        const bridge = window.__followLensWorkerE2E;
+        const state = window.__followLensBenchmark;
+        if (
+          !bridge ||
+          bridge.operationStartedAt === null ||
+          bridge.dashboardPresentedAt === null ||
+          !bridge.lastDashboard ||
+          !bridge.pipelineMetrics
+        ) {
+          throw new Error(
+            'The actual dashboard did not expose completed benchmark results.',
+          );
+        }
+        const dashboard = bridge.lastDashboard;
+        if (bridge.referenceDashboard) {
+          const sameArray = (left: string[], right: string[]) =>
+            left.length === right.length &&
+            left.every((name, index) => name === right[index]);
+          const reference = bridge.referenceDashboard;
+          const groups = Object.keys(dashboard.data) as Array<
+            keyof typeof dashboard.data
+          >;
+          if (
+            !sameArray(
+              reference.snapshot.followers,
+              dashboard.snapshot.followers,
+            ) ||
+            !sameArray(
+              reference.snapshot.following,
+              dashboard.snapshot.following,
+            ) ||
+            groups.some(
+              (group) =>
+                !sameArray(reference.data[group], dashboard.data[group]),
+            )
+          ) {
+            throw new Error(
+              'Main-thread and Worker dashboard arrays are not identical.',
+            );
+          }
+        } else {
+          bridge.referenceDashboard = dashboard;
+        }
+        const groups = dashboard.data;
+        const rows = [
+          ...document.querySelectorAll(
+            '[aria-label="Listado de cuentas"] tbody tr',
+          ),
+        ].map((row) => row.querySelector('strong')?.textContent ?? '');
+        const firstPageMatches = rows.every(
+          (name, index) => name === `@${groups.notBack[index]}`,
+        );
+        if (!firstPageMatches)
+          throw new Error('Rendered dashboard rows differ from analyzed data.');
+        const endAt = bridge.dashboardPresentedAt;
+        const frameTimes = bridge.frameTimes.filter(
+          (time) => time >= bridge.operationStartedAt! && time <= endAt,
+        );
+        const frameGaps: number[] = [];
+        let previousFrame = bridge.operationStartedAt;
+        for (const time of frameTimes) {
+          frameGaps.push(time - previousFrame);
+          previousFrame = time;
+        }
+        frameGaps.push(endAt - previousFrame);
+        if (state?.observer) {
+          for (const task of state.observer.takeRecords())
+            state.longTasks.push({
+              startTime: task.startTime,
+              duration: task.duration,
+            });
+        }
+        const tasks = state?.longTasksSupported
+          ? state.longTasks.filter(
+              (task) =>
+                task.startTime >= bridge.operationStartedAt! &&
+                task.startTime < endAt,
+            )
+          : null;
+        const heapBytes = () =>
+          (
+            performance as Performance & {
+              memory?: { usedJSHeapSize: number };
+            }
+          ).memory?.usedJSHeapSize ?? null;
+        const metrics = bridge.pipelineMetrics;
+        return {
+          mode: metrics.mode,
+          importMs: metrics.importMs,
+          analysisMs: metrics.analysisMs ?? bridge.analysisMs,
+          workerReadyMs: metrics.workerReadyMs,
+          roundTripMs: metrics.roundTripMs,
+          postMessageCallMs: metrics.postMessageCallMs,
+          dashboardMs: endAt - bridge.operationStartedAt,
+          interactionProbeOffsetMs:
+            bridge.interactionProbeAt === null
+              ? null
+              : bridge.interactionProbeAt - bridge.operationStartedAt,
+          frameCount: frameTimes.length,
+          maxFrameGapMs: Math.max(...frameGaps),
+          longTaskCount: tasks?.length ?? null,
+          longestLongTaskMs: tasks?.length
+            ? Math.max(...tasks.map((task) => task.duration))
+            : tasks
+              ? 0
+              : null,
+          memoryBeforeBytes: bridge.memoryBeforeBytes,
+          memoryAfterBytes: heapBytes(),
+          counts: {
+            followers: dashboard.snapshot.followers.length,
+            following: dashboard.snapshot.following.length,
+            mutuals: groups.mutuals.length,
+            notBack: groups.notBack.length,
+            fans: groups.fans.length,
+          },
+        };
+      });
+      return {
+        ...browserMetrics,
+        interactionClickMs,
+        harnessToDashboardMs: nodePerformance.now() - operationHarnessStart,
+      };
+    };
+    const resetDashboard = async () => {
+      await page.evaluate(() => {
+        const bridge = window.__followLensWorkerE2E;
+        if (!bridge?.resetDashboard)
+          throw new Error('Benchmark dashboard reset is unavailable.');
+        bridge.resetDashboard();
+      });
+      await expect(
+        page.getByRole('heading', { name: 'Tus relaciones.' }),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole('button', { name: 'Importar datos' }),
+      ).toBeVisible();
+    };
+    await page.goto('/');
+    await expect(
+      page.getByRole('heading', { name: 'Lo que cambia. Lo que importa.' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Importar datos' }).click();
+    await expect(dialog).toBeVisible();
+    await choose(
+      'synthetic-worker-invalid.zip',
+      { buffer: Buffer.from([0, 1, 2, 3]) },
+      `bench${scenarioIndex}recovery`,
+    );
+    const input = dialog.getByLabel('Archivos de Instagram');
+    const submit = dialog.getByRole('button', {
+      name: 'Analizar importación',
+    });
+    await page.evaluate(() => {
+      const bridge = window.__followLensWorkerE2E;
+      if (!bridge) throw new Error('Benchmark bridge is missing.');
+      bridge.mode = 'worker-warm';
+    });
+    await submit.click();
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Tus relaciones.' }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => window.__followLensWorkerE2E?.lastDashboard ?? null,
+      ),
+    ).toBeNull();
+    await input.setInputFiles({
+      name: 'synthetic-worker-oversized.zip',
+      mimeType: 'application/zip',
+      buffer: oversizedArchive.buffer,
+    });
+    await submit.click();
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Tus relaciones.' }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => window.__followLensWorkerE2E?.lastDashboard ?? null,
+      ),
+    ).toBeNull();
+    await input.setInputFiles({
+      name: 'synthetic-worker-recovery.zip',
+      mimeType: 'application/zip',
+      buffer: archive.buffer,
+    });
+    await expect(
+      dialog.getByText('synthetic-worker-recovery.zip', { exact: true }),
+    ).toBeVisible();
+    const recovery = await submitAndMeasure('worker-warm');
+    const samples: Array<
+      Awaited<ReturnType<typeof submitAndMeasure>> & {
+        scenario?: string;
+        repetition?: number;
+        variantOrder?: number;
+      }
+    > = [recovery];
+    await resetDashboard();
+    const variants = ['main-thread', 'worker-warm', 'worker-cold'] as const;
+    for (let repetition = 0; repetition < 5; repetition++) {
+      const ordered = repetition % 2 === 0 ? variants : [...variants].reverse();
+      for (const [variantIndex, mode] of ordered.entries()) {
+        await page.getByRole('button', { name: 'Importar datos' }).click();
+        await expect(dialog).toBeVisible();
+        const account = `bench${scenarioIndex}${mode === 'main-thread' ? 'm' : mode === 'worker-warm' ? 'w' : 'c'}${repetition}`;
+        await choose(
+          `synthetic-${fixture.name}-${mode}-${repetition}.zip`,
+          { buffer: archive.buffer },
+          account,
+        );
+        const sample = await submitAndMeasure(mode);
+        samples.push({
+          scenario: fixture.name,
+          repetition: repetition + 1,
+          variantOrder: variantIndex + 1,
+          ...sample,
+        });
+        await resetDashboard();
+      }
+    }
+    const lifecycle = await page.evaluate(() => {
+      const bridge = window.__followLensWorkerE2E;
+      if (!bridge) throw new Error('Benchmark bridge disappeared.');
+      bridge.closeWorkers();
+      return {
+        warmWorkerReadyMs: bridge.warmWorkerReadyMs,
+        terminatedWorkers: bridge.terminatedWorkers,
+      };
+    });
+    expect(lifecycle.terminatedWorkers).toBe(6);
+    const sanitizedSamples = samples.map((sample) => {
+      return {
+        ...sample,
+        importMs: Number(sample.importMs.toFixed(2)),
+        analysisMs:
+          sample.analysisMs === null
+            ? null
+            : Number(sample.analysisMs.toFixed(2)),
+        dashboardMs: Number(sample.dashboardMs.toFixed(2)),
+        roundTripMs:
+          sample.roundTripMs === null
+            ? null
+            : Number(sample.roundTripMs.toFixed(2)),
+        interactionClickMs: Number(sample.interactionClickMs.toFixed(2)),
+        interactionProbeOffsetMs:
+          sample.interactionProbeOffsetMs === null
+            ? null
+            : Number(sample.interactionProbeOffsetMs.toFixed(2)),
+        maxFrameGapMs: Number(sample.maxFrameGapMs.toFixed(2)),
+        longestLongTaskMs:
+          sample.longestLongTaskMs === null
+            ? null
+            : Number(sample.longestLongTaskMs.toFixed(2)),
+      };
+    });
+    const errorChecks = {
+      invalidZipRejectedWithoutPartialResult: true,
+      oversizedZipRejectedWithoutPartialResult: true,
+      validRetrySucceeded: true,
+      workersTerminated: lifecycle.terminatedWorkers === 6,
+    };
+    expect(errorChecks.workersTerminated).toBe(true);
+    expect(sanitizedSamples).toHaveLength(16);
+    allMeasurements.push(...sanitizedSamples);
+    console.log(
+      JSON.stringify({
+        scenario: fixture.name,
+        archiveBytes: archive.archiveBytes,
+        compressedRelationshipBytes: archive.compressedBytes,
+        uncompressedRelationshipBytes: archive.uncompressedBytes,
+        expectedCounts: {
+          ...archive.counts,
+          fans: fixture.followerCount - fixture.mutualCount,
+        },
+        warmWorkerReadyMs:
+          lifecycle.warmWorkerReadyMs === null
+            ? null
+            : Number(lifecycle.warmWorkerReadyMs.toFixed(2)),
+        errorChecks,
+        samples: sanitizedSamples,
+        note: 'Dashboard latency ends after real React dashboard selectors and rendered first-page names match the app state. Main analysis is timed around production analyze in Home; Worker analysis uses the same production function inside the Worker. Interaction latency is a Playwright click on a temporary accessible test probe mounted in the real app document; it measures browser input response, not an application action handler. Frame intervals are requestAnimationFrame opportunities, not confirmed paints. Heap is optional Chromium JS heap, not process or peak memory. Main-thread and Worker variants use identical synthetic archive bytes; no imported names or lists are logged.',
+      }),
+    );
+    await page.goto('about:blank');
+  }
+  expect(allMeasurements).toHaveLength(48);
   assertNoExternalTrafficOrErrors(signals);
 });
 

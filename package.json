@@ -20,6 +20,7 @@
     "benchmark:importer:optimization": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"compares the current importer with the direct-set parser prototype\"",
     "benchmark:importer:crc32": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks CRC32 slicing-by-8 against production reference\"",
     "benchmark:importer:worker": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks importer worker responsiveness against main-thread import\"",
+    "benchmark:importer:worker-e2e": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks end-to-end Worker import, analysis, and React dashboard responsiveness\"",
     "profile:importer:browser": "node scripts/profile-importer-browser.ts",
     "typecheck": "tsc --noEmit"
   },

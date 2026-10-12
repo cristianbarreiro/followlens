@@ -1,8 +1,10 @@
 import { importFiles } from '../../lib/importer.ts';
+import { analyze, type Snapshot } from '../../lib/relationships.ts';
 
 type ImportRequest = {
   operationId: string;
   file: File;
+  snapshot?: Pick<Snapshot, 'id' | 'account' | 'date' | 'importedAt'>;
 };
 
 type ImportResponse =
@@ -10,7 +12,9 @@ type ImportResponse =
       operationId: string;
       ok: true;
       result: Awaited<ReturnType<typeof importFiles>>;
+      analysis?: ReturnType<typeof analyze>;
       importMs: number;
+      analysisMs?: number;
       workerHeapBeforeBytes: number | null;
       workerHeapAfterBytes: number | null;
     }
@@ -31,7 +35,7 @@ const workerScope = self as unknown as {
 workerScope.addEventListener(
   'message',
   async (event: MessageEvent<ImportRequest>) => {
-    const { operationId, file } = event.data;
+    const { operationId, file, snapshot } = event.data;
     if (!operationId || !(file instanceof File)) return;
 
     const workerHeap = () =>
@@ -45,11 +49,20 @@ workerScope.addEventListener(
 
     try {
       const result = await importFiles([file]);
+      let analysis: ReturnType<typeof analyze> | undefined;
+      let analysisMs: number | undefined;
+      if (snapshot) {
+        const analysisStartedAt = performance.now();
+        analysis = analyze({ ...snapshot, ...result });
+        analysisMs = performance.now() - analysisStartedAt;
+      }
       const response: ImportResponse = {
         operationId,
         ok: true,
         result,
+        ...(analysis ? { analysis } : {}),
         importMs: performance.now() - startedAt,
+        ...(analysisMs !== undefined ? { analysisMs } : {}),
         workerHeapBeforeBytes,
         workerHeapAfterBytes: workerHeap(),
       };

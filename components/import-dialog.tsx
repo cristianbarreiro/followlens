@@ -16,18 +16,46 @@ import {
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { importFiles } from '@/lib/importer';
-import { normalize, type Snapshot } from '@/lib/relationships';
+import { normalize, type Group, type Snapshot } from '@/lib/relationships';
+
+export type ImportPipelineResult = {
+  imported: Awaited<ReturnType<typeof importFiles>>;
+  analysis?: Record<Group, string[]>;
+  metrics: {
+    mode: 'main-thread' | 'worker-warm' | 'worker-cold';
+    importMs: number;
+    analysisMs: number | null;
+    workerReadyMs: number | null;
+    roundTripMs: number | null;
+    postMessageCallMs: number | null;
+  };
+};
+
+export type ImportPipeline = (
+  files: File[],
+  snapshot: Pick<Snapshot, 'id' | 'account' | 'date' | 'importedAt'>,
+) => Promise<ImportPipelineResult>;
+
+type ProcessedImport = Pick<ImportPipelineResult, 'imported' | 'analysis'> & {
+  metrics?: ImportPipelineResult['metrics'];
+};
 
 export function ImportDialog({
   open,
   onOpenChange,
   onImport,
   account,
+  processFiles,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onImport: (s: Snapshot, persist: boolean) => Promise<void>;
+  onImport: (
+    s: Snapshot,
+    persist: boolean,
+    analysis?: Record<Group, string[]>,
+  ) => Promise<void>;
   account: string;
+  processFiles?: ImportPipeline;
 }) {
   const [files, setFiles] = useState<File[]>([]),
     [handle, setHandle] = useState(account),
@@ -70,7 +98,35 @@ export function ImportDialog({
     setBusy(true);
     setProcessing('Leyendo y validando los archivos en este dispositivo…');
     try {
-      const result = await importFiles(files);
+      const snapshot = {
+        id: crypto.randomUUID(),
+        account: normalized,
+        date,
+        importedAt: new Date().toISOString(),
+      };
+      const benchmark =
+        import.meta.env.DEV && typeof window !== 'undefined'
+          ? window.__followLensWorkerE2E
+          : undefined;
+      if (benchmark) {
+        benchmark.operationStartedAt = performance.now();
+        benchmark.dashboardPresentedAt = null;
+        benchmark.analysisMs = null;
+        benchmark.lastDashboard = null;
+      }
+      let processed: ProcessedImport;
+      if (import.meta.env.DEV && processFiles) {
+        processed = await processFiles(files, snapshot);
+      } else {
+        const imported = await importFiles(files);
+        processed = { imported };
+      }
+      if (benchmark) {
+        if (!processed.metrics)
+          throw new Error('Benchmark processing metrics are unavailable.');
+        benchmark.pipelineMetrics = processed.metrics;
+        benchmark.analysisMs = processed.metrics.analysisMs;
+      }
       setProcessing(
         persist
           ? 'Guardando la importación y actualizando resultados…'
@@ -78,14 +134,12 @@ export function ImportDialog({
       );
       await onImport(
         {
-          id: crypto.randomUUID(),
-          account: normalized,
-          date,
-          importedAt: new Date().toISOString(),
-          followers: result.followers,
-          following: result.following,
+          ...snapshot,
+          followers: processed.imported.followers,
+          following: processed.imported.following,
         },
         persist,
+        processed.analysis,
       );
       onOpenChange(false);
     } catch (err) {

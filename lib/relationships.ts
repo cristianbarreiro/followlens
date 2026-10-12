@@ -108,7 +108,9 @@ const intersect = (a: Set<string>, b: Set<string>) =>
 export function analyze(
   current: Snapshot,
   previous?: Snapshot,
+  onMeasure?: (durationMs: number) => void,
 ): Record<Group, string[]> {
+  const startedAt = onMeasure ? performance.now() : 0;
   if (
     previous &&
     (previous.account !== current.account || previous.date >= current.date)
@@ -120,7 +122,7 @@ export function analyze(
     pg = new Set(previous?.following);
   const m = new Set(intersect(f, g)),
     pm = new Set(intersect(pf, pg));
-  return {
+  const result = {
     followers: [...f].sort(),
     following: [...g].sort(),
     mutuals: [...m],
@@ -133,6 +135,8 @@ export function analyze(
     lostMutuals: previous ? diff(pm, m) : [],
     newMutuals: previous ? diff(m, pm) : [],
   };
+  if (onMeasure) onMeasure(performance.now() - startedAt);
+  return result;
 }
 export function relationship(snapshot: Snapshot, name: string) {
   const f = snapshot.followers.includes(name),
