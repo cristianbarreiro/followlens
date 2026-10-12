@@ -31,6 +31,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
 - `npm run benchmark:importer:realistic`: Compare realistic high-cardinality JSON imports at three scales in Chromium.
 - `npm run benchmark:importer:optimization`: Compare the current importer with a benchmark-only direct-Set parser prototype.
 - `npm run benchmark:importer:crc32`: Compare production CRC32 with an isolated slicing-by-8 benchmark candidate.
+- `npm run benchmark:importer:worker`: Compare main-thread imports with an isolated Worker; optional diagnostic only.
 - `npm run profile:importer:browser`: Profile repeated medium/near-limit imports through Chrome DevTools Protocol.
 - `npm run typecheck`: Strict TypeScript check (`tsc --noEmit`).
 - `npm run build`: Production compilation (`vinext build`).

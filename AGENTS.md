@@ -94,6 +94,7 @@ Derived directly from `package.json`:
 | **Realistic browser benchmark** | `npm run benchmark:importer:realistic` | Compare high-cardinality official-schema JSON imports in Chromium. | Three scales and two repetitions; synthetic, opt-in, no thresholds. |
 | **Importer optimization experiment** | `npm run benchmark:importer:optimization` | Compare current import path with an isolated direct-Set parser prototype. | Three repetitions after warm-up at three scales; benchmark-only. |
 | **CRC32 alternative benchmark** | `npm run benchmark:importer:crc32` | Compare production CRC32 with a benchmark-only slicing-by-8 implementation. | Five repetitions per ZIP entry and scale; synthetic Chromium run, no thresholds. |
+| **Worker responsiveness experiment** | `npm run benchmark:importer:worker` | Compare main-thread imports with an isolated Worker using the production importer. | Five repetitions per variant and scale; optional Chromium diagnostic, not CI. |
 | **Browser CPU profile** | `npm run profile:importer:browser` | Profile medium and near-limit imports with CDP. | Standalone opt-in; summary only, no raw profile files. |
 | **Browser E2E** | `npm run test:e2e` | Run importer regressions in Chromium. | Install once with `npx playwright install chromium`. |
 | **Typecheck** | `npm run typecheck` | Run strict TypeScript validation. | `tsc --noEmit`. |

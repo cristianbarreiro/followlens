@@ -19,6 +19,7 @@
     "benchmark:importer:realistic": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks realistic high-cardinality relationship imports in Chromium\" --repeat-each=2",
     "benchmark:importer:optimization": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"compares the current importer with the direct-set parser prototype\"",
     "benchmark:importer:crc32": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks CRC32 slicing-by-8 against production reference\"",
+    "benchmark:importer:worker": "playwright test --config=playwright.browser-benchmark.config.ts --grep \"benchmarks importer worker responsiveness against main-thread import\"",
     "profile:importer:browser": "node scripts/profile-importer-browser.ts",
     "typecheck": "tsc --noEmit"
   },

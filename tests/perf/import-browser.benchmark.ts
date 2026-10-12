@@ -1886,6 +1886,675 @@ test('benchmarks CRC32 slicing-by-8 against production reference', async ({
   assertNoExternalTrafficOrErrors(signals);
 });
 
+test('benchmarks importer worker responsiveness against main-thread import', async ({
+  page,
+}) => {
+  test.setTimeout(900_000);
+  const signals = await preparePage(page);
+  const scenarios = [
+    {
+      name: 'representative-medium',
+      followerCount: 5_000,
+      followingCount: 4_000,
+      mutualCount: 2_500,
+    },
+    {
+      name: 'high-cardinality',
+      followerCount: 30_000,
+      followingCount: 24_000,
+      mutualCount: 15_000,
+    },
+    {
+      name: 'largest-valid-near-limit',
+      followerCount: 114_000,
+      followingCount: 90_000,
+      mutualCount: 56_250,
+    },
+  ] as const;
+  const measurements: Array<Record<string, unknown>> = [];
+  const oversizedZipBytes = Uint8Array.from(
+    makeBudgetZip(MAX_JSON_TOTAL + 1).buffer,
+  );
+
+  for (const fixture of scenarios) {
+    const archive = realisticArchive(
+      fixture.followerCount,
+      fixture.followingCount,
+      fixture.mutualCount,
+      'deflate',
+    );
+    await openImportDialog(
+      page,
+      page.getByRole('dialog', { name: 'Una nueva perspectiva' }),
+      archive,
+      `synthetic-worker-${fixture.name}.zip`,
+    );
+
+    const results = await page.evaluate(
+      async ({ scenarioName, expectedCounts, oversizedBytes }) => {
+        type Imported = {
+          followers: string[];
+          following: string[];
+          fileCount: number;
+        };
+        type WorkerSuccess = {
+          operationId: string;
+          ok: true;
+          result: Imported;
+          importMs: number;
+          workerHeapBeforeBytes: number | null;
+          workerHeapAfterBytes: number | null;
+        };
+        type WorkerFailure = {
+          operationId: string;
+          ok: false;
+          error: string;
+        };
+        type WorkerResponse = { type: 'ready' } | WorkerSuccess | WorkerFailure;
+        type Pending = {
+          resolve: (response: WorkerSuccess | WorkerFailure) => void;
+          reject: (error: Error) => void;
+          timeoutId: number;
+        };
+        type WorkerClient = {
+          worker: Worker;
+          readyMs: number;
+          request: (file: File) => Promise<{
+            response: WorkerSuccess | WorkerFailure;
+            roundTripMs: number;
+            postMessageCallMs: number;
+          }>;
+          requestUnanswered: () => Promise<void>;
+          close: () => void;
+        };
+        type TaskSample = { startTime: number; duration: number };
+        type ImportMeasurement = {
+          scenario: string;
+          run: number;
+          mode: 'main-thread' | 'worker-warm' | 'worker-cold';
+          internalImportMs: number;
+          observableMs: number;
+          workerCreationMs: number | null;
+          postMessageCallMs: number | null;
+          roundTripMs: number | null;
+          analyzeMs: number;
+          importLongTaskCount: number | null;
+          importLongestTaskMs: number | null;
+          importMaxTimerGapMs: number;
+          analyzeLongTaskCount: number | null;
+          analyzeLongestTaskMs: number | null;
+          analyzeMaxTimerGapMs: number;
+          heapBeforeBytes: number | null;
+          heapAfterBytes: number | null;
+          workerHeapBeforeBytes: number | null;
+          workerHeapAfterBytes: number | null;
+          counts: {
+            followers: number;
+            following: number;
+            mutuals: number;
+            notBack: number;
+            fans: number;
+          };
+        };
+        const selectedFile = document.querySelector<HTMLInputElement>(
+          'input[aria-label="Archivos de Instagram"]',
+        )?.files?.[0];
+        if (!selectedFile)
+          throw new Error('Synthetic Worker benchmark file is missing.');
+        const importerUrl = new URL('/lib/importer.ts', location.origin).href;
+        const relationshipsUrl = new URL(
+          '/lib/relationships.ts',
+          location.origin,
+        ).href;
+        const workerUrl = new URL(
+          '/tests/perf/importer.worker.ts',
+          location.origin,
+        ).href;
+        const [{ importFiles }, { analyze }] = await Promise.all([
+          import(/* @vite-ignore */ importerUrl),
+          import(/* @vite-ignore */ relationshipsUrl),
+        ]);
+        let operationNumber = 0;
+        let referenceResult: Imported | null = null;
+        const sameResult = (left: Imported, right: Imported) =>
+          left.fileCount === right.fileCount &&
+          left.followers.length === right.followers.length &&
+          left.following.length === right.following.length &&
+          left.followers.every(
+            (name, index) => name === right.followers[index],
+          ) &&
+          left.following.every(
+            (name, index) => name === right.following[index],
+          );
+        const assertMatchesReference = (result: Imported) => {
+          if (referenceResult && !sameResult(referenceResult, result))
+            throw new Error(
+              'Worker and main-thread relationship arrays differ.',
+            );
+          referenceResult ??= result;
+        };
+        const readHeap = () =>
+          (
+            performance as Performance & {
+              memory?: { usedJSHeapSize: number };
+            }
+          ).memory?.usedJSHeapSize ?? null;
+        const drainTasks = async (startTime: number, endTime: number) => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const state = window.__followLensBenchmark;
+          if (state?.longTasksSupported) {
+            for (const task of state.observer?.takeRecords() ?? [])
+              state.longTasks.push({
+                startTime: task.startTime,
+                duration: task.duration,
+              });
+          }
+          if (!state?.longTasksSupported) return null;
+          return state.longTasks.filter(
+            (task) => task.startTime >= startTime && task.startTime < endTime,
+          ) as TaskSample[];
+        };
+        const summarizeTasks = (tasks: TaskSample[] | null) => ({
+          count: tasks?.length ?? null,
+          maxMs: tasks?.length
+            ? Number(Math.max(...tasks.map((task) => task.duration)).toFixed(2))
+            : tasks
+              ? 0
+              : null,
+        });
+        const measureTimerGap = async <T>(operation: () => T | Promise<T>) => {
+          let previousTick = performance.now();
+          let maxGapMs = 0;
+          const interval = window.setInterval(() => {
+            const currentTick = performance.now();
+            maxGapMs = Math.max(maxGapMs, currentTick - previousTick);
+            previousTick = currentTick;
+          }, 16);
+          try {
+            const result = await operation();
+            const elapsedMs = performance.now();
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return {
+              result,
+              elapsedMs,
+              maxGapMs: Number(maxGapMs.toFixed(2)),
+            };
+          } finally {
+            window.clearInterval(interval);
+          }
+        };
+        const countsFor = (result: Imported) => {
+          const following = new Set(result.following);
+          const followers = new Set(result.followers);
+          const mutuals = [...followers].filter((name) =>
+            following.has(name),
+          ).length;
+          return {
+            followers: result.followers.length,
+            following: result.following.length,
+            mutuals,
+            notBack: result.following.length - mutuals,
+            fans: result.followers.length - mutuals,
+          };
+        };
+        const assertCounts = (result: Imported) => {
+          const actual = countsFor(result);
+          for (const key of Object.keys(expectedCounts) as Array<
+            keyof typeof expectedCounts
+          >) {
+            if (actual[key] !== expectedCounts[key])
+              throw new Error('Worker benchmark returned unexpected counts.');
+          }
+          return actual;
+        };
+        const runAnalyze = (result: Imported) => {
+          const startedAt = performance.now();
+          const analyzed = analyze({
+            id: 'synthetic-worker-benchmark',
+            account: 'synthetic',
+            date: '2020-01-02',
+            importedAt: '2020-01-02T00:00:00.000Z',
+            followers: result.followers,
+            following: result.following,
+          });
+          const elapsedMs = performance.now() - startedAt;
+          if (
+            analyzed.followers.length !== expectedCounts.followers ||
+            analyzed.following.length !== expectedCounts.following ||
+            analyzed.mutuals.length !== expectedCounts.mutuals ||
+            analyzed.notBack.length !== expectedCounts.notBack ||
+            analyzed.fans.length !==
+              expectedCounts.followers - expectedCounts.mutuals
+          ) {
+            throw new Error('Post-import analysis returned unexpected counts.');
+          }
+          return elapsedMs;
+        };
+        const createWorker = async (): Promise<WorkerClient> => {
+          const creationStartedAt = performance.now();
+          const worker = new Worker(workerUrl, { type: 'module' });
+          const pending = new Map<string, Pending>();
+          let readyResolve: (() => void) | null = null;
+          let readyReject: ((error: Error) => void) | null = null;
+          let isReady = false;
+          let failed = false;
+          let readyTimeoutId = 0;
+          const ready = new Promise<void>((resolve, reject) => {
+            readyResolve = resolve;
+            readyReject = reject;
+            readyTimeoutId = window.setTimeout(
+              () => reject(new Error('Importer Worker startup timed out.')),
+              30_000,
+            );
+          });
+          const fail = (error: Error) => {
+            if (failed) return;
+            failed = true;
+            readyReject?.(error);
+            for (const request of pending.values()) {
+              window.clearTimeout(request.timeoutId);
+              request.reject(error);
+            }
+            pending.clear();
+          };
+          worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+            const response = event.data;
+            if ('type' in response && response.type === 'ready') {
+              isReady = true;
+              window.clearTimeout(readyTimeoutId);
+              readyResolve?.();
+              return;
+            }
+            if (!('operationId' in response)) return;
+            const request = pending.get(response.operationId);
+            if (!request) return;
+            pending.delete(response.operationId);
+            window.clearTimeout(request.timeoutId);
+            request.resolve(response);
+          };
+          worker.onerror = (event) => {
+            event.preventDefault();
+            fail(new Error('Importer Worker failed unexpectedly.'));
+          };
+          worker.onmessageerror = () =>
+            fail(new Error('Importer Worker response could not be decoded.'));
+          try {
+            await ready;
+          } catch (error) {
+            worker.terminate();
+            throw error;
+          }
+          if (!isReady || failed) {
+            worker.terminate();
+            throw new Error('Importer Worker did not become ready.');
+          }
+          const readyMs = performance.now() - creationStartedAt;
+          return {
+            worker,
+            readyMs,
+            request: async (file) => {
+              if (failed)
+                throw new Error('Importer Worker is no longer usable.');
+              const operationId = `${scenarioName}-${++operationNumber}`;
+              const startedAt = performance.now();
+              let postMessageCallMs = 0;
+              const response = await new Promise<WorkerSuccess | WorkerFailure>(
+                (resolve, reject) => {
+                  const timeoutId = window.setTimeout(() => {
+                    const error = new Error(
+                      'Importer Worker did not respond to the operation.',
+                    );
+                    fail(error);
+                    worker.terminate();
+                  }, 120_000);
+                  pending.set(operationId, { resolve, reject, timeoutId });
+                  const postStartedAt = performance.now();
+                  try {
+                    worker.postMessage({ operationId, file });
+                    postMessageCallMs = performance.now() - postStartedAt;
+                  } catch (error) {
+                    window.clearTimeout(timeoutId);
+                    pending.delete(operationId);
+                    reject(
+                      error instanceof Error
+                        ? error
+                        : new Error('Could not send the file to the Worker.'),
+                    );
+                  }
+                },
+              );
+              return {
+                response,
+                roundTripMs: performance.now() - startedAt,
+                postMessageCallMs,
+              };
+            },
+            requestUnanswered: async () => {
+              if (failed)
+                throw new Error('Importer Worker is no longer usable.');
+              const operationId = `${scenarioName}-${++operationNumber}`;
+              await new Promise<void>((resolve, reject) => {
+                const timeoutId = window.setTimeout(() => {
+                  const error = new Error(
+                    'Importer Worker did not respond to the operation.',
+                  );
+                  fail(error);
+                  worker.terminate();
+                }, 250);
+                pending.set(operationId, {
+                  resolve: () => resolve(),
+                  reject,
+                  timeoutId,
+                });
+                try {
+                  worker.postMessage({ operationId });
+                } catch (error) {
+                  window.clearTimeout(timeoutId);
+                  pending.delete(operationId);
+                  reject(
+                    error instanceof Error
+                      ? error
+                      : new Error('Could not send the Worker probe.'),
+                  );
+                }
+              });
+            },
+            close: () => {
+              fail(new Error('Importer Worker was terminated.'));
+              worker.terminate();
+            },
+          };
+        };
+        const mainImport = async (run: number): Promise<ImportMeasurement> => {
+          const heapBeforeBytes = readHeap();
+          const startedAt = performance.now();
+          const measuredImport = await measureTimerGap(() =>
+            importFiles([selectedFile]),
+          );
+          const result = measuredImport.result;
+          const finishedAt = measuredImport.elapsedMs;
+          assertMatchesReference(result);
+          const importTasks = await drainTasks(startedAt, finishedAt);
+          const analyzeStartedAt = performance.now();
+          const measuredAnalyze = await measureTimerGap(() =>
+            runAnalyze(result),
+          );
+          const analyzeMs = measuredAnalyze.result;
+          const analyzeFinishedAt = measuredAnalyze.elapsedMs;
+          const analyzeTasks = await drainTasks(
+            analyzeStartedAt,
+            analyzeFinishedAt,
+          );
+          return {
+            scenario: scenarioName,
+            run,
+            mode: 'main-thread',
+            internalImportMs: finishedAt - startedAt,
+            observableMs: finishedAt - startedAt,
+            workerCreationMs: null,
+            postMessageCallMs: null,
+            roundTripMs: null,
+            analyzeMs,
+            importLongTaskCount: summarizeTasks(importTasks).count,
+            importLongestTaskMs: summarizeTasks(importTasks).maxMs,
+            importMaxTimerGapMs: measuredImport.maxGapMs,
+            analyzeLongTaskCount: summarizeTasks(analyzeTasks).count,
+            analyzeLongestTaskMs: summarizeTasks(analyzeTasks).maxMs,
+            analyzeMaxTimerGapMs: measuredAnalyze.maxGapMs,
+            heapBeforeBytes,
+            heapAfterBytes: readHeap(),
+            workerHeapBeforeBytes: null,
+            workerHeapAfterBytes: null,
+            counts: assertCounts(result),
+          };
+        };
+        const workerImport = async (
+          client: WorkerClient,
+          run: number,
+          mode: 'worker-warm' | 'worker-cold',
+          coldStartedAt: number | null = null,
+        ): Promise<ImportMeasurement> => {
+          const heapBeforeBytes = readHeap();
+          const startedAt = performance.now();
+          const measuredExchange = await measureTimerGap(() =>
+            client.request(selectedFile),
+          );
+          const exchange = measuredExchange.result;
+          const receivedAt = measuredExchange.elapsedMs;
+          const importTasks = await drainTasks(startedAt, receivedAt);
+          if (!exchange.response.ok)
+            throw new Error(
+              'Valid synthetic Worker import unexpectedly failed.',
+            );
+          const successfulResponse = exchange.response;
+          assertMatchesReference(successfulResponse.result);
+          const analyzeStartedAt = performance.now();
+          const measuredAnalyze = await measureTimerGap(() =>
+            runAnalyze(successfulResponse.result),
+          );
+          const analyzeMs = measuredAnalyze.result;
+          const analyzeFinishedAt = measuredAnalyze.elapsedMs;
+          const analyzeTasks = await drainTasks(
+            analyzeStartedAt,
+            analyzeFinishedAt,
+          );
+          return {
+            scenario: scenarioName,
+            run,
+            mode,
+            internalImportMs: successfulResponse.importMs,
+            observableMs:
+              coldStartedAt === null
+                ? exchange.roundTripMs
+                : receivedAt - coldStartedAt,
+            workerCreationMs: mode === 'worker-cold' ? client.readyMs : null,
+            postMessageCallMs: exchange.postMessageCallMs,
+            roundTripMs: exchange.roundTripMs,
+            analyzeMs,
+            importLongTaskCount: summarizeTasks(importTasks).count,
+            importLongestTaskMs: summarizeTasks(importTasks).maxMs,
+            importMaxTimerGapMs: measuredExchange.maxGapMs,
+            analyzeLongTaskCount: summarizeTasks(analyzeTasks).count,
+            analyzeLongestTaskMs: summarizeTasks(analyzeTasks).maxMs,
+            analyzeMaxTimerGapMs: measuredAnalyze.maxGapMs,
+            heapBeforeBytes,
+            heapAfterBytes: readHeap(),
+            workerHeapBeforeBytes: successfulResponse.workerHeapBeforeBytes,
+            workerHeapAfterBytes: successfulResponse.workerHeapAfterBytes,
+            counts: assertCounts(successfulResponse.result),
+          };
+        };
+        const timeoutWorker = await createWorker();
+        let noResponseWasHandled = false;
+        try {
+          await timeoutWorker.requestUnanswered();
+        } catch (error) {
+          noResponseWasHandled =
+            error instanceof Error && error.message.includes('did not respond');
+        }
+        timeoutWorker.close();
+        if (!noResponseWasHandled)
+          throw new Error('Worker timeout did not reject a missing response.');
+        const warmWorker = await createWorker();
+        const invalidFile = new File(
+          [new Uint8Array([0, 1, 2, 3])],
+          'synthetic-invalid.zip',
+          { type: 'application/zip' },
+        );
+        const invalidExchange = await warmWorker.request(invalidFile);
+        if (
+          invalidExchange.response.ok ||
+          invalidExchange.response.operationId !==
+            `${scenarioName}-${operationNumber}` ||
+          'result' in invalidExchange.response
+        ) {
+          warmWorker.close();
+          throw new Error('Invalid ZIP did not fail without a partial result.');
+        }
+
+        const oversizedFile = new File(
+          [oversizedBytes],
+          'synthetic-oversized.zip',
+          { type: 'application/zip' },
+        );
+        const oversizedExchange = await warmWorker.request(oversizedFile);
+        if (
+          oversizedExchange.response.ok ||
+          'result' in oversizedExchange.response
+        ) {
+          warmWorker.close();
+          throw new Error(
+            'Oversized ZIP did not fail without a partial result.',
+          );
+        }
+        const recovered = await warmWorker.request(selectedFile);
+        if (
+          !recovered.response.ok ||
+          !sameResult(
+            recovered.response.result,
+            await importFiles([selectedFile]),
+          )
+        ) {
+          warmWorker.close();
+          throw new Error(
+            'Worker did not recover after controlled import errors.',
+          );
+        }
+
+        const warmupResult = await importFiles([selectedFile]);
+        const workerWarmup = await warmWorker.request(selectedFile);
+        if (
+          !workerWarmup.response.ok ||
+          !sameResult(warmupResult, workerWarmup.response.result)
+        ) {
+          warmWorker.close();
+          throw new Error('Warm-up outputs differ between import paths.');
+        }
+        assertMatchesReference(warmupResult);
+        runAnalyze(warmupResult);
+        const samples: ImportMeasurement[] = [];
+        for (let repetition = 0; repetition < 5; repetition++) {
+          const current = async () => mainImport(repetition);
+          const warm = async () =>
+            workerImport(warmWorker, repetition, 'worker-warm');
+          const cold = async () => {
+            const coldStart = performance.now();
+            const client = await createWorker();
+            try {
+              return await workerImport(
+                client,
+                repetition,
+                'worker-cold',
+                coldStart,
+              );
+            } finally {
+              client.close();
+            }
+          };
+          const ordered =
+            repetition % 2 === 0
+              ? [current, warm, cold]
+              : [cold, warm, current];
+          for (const run of ordered) samples.push(await run());
+        }
+        warmWorker.close();
+        return {
+          samples: samples.map((sample) => ({
+            ...sample,
+            internalImportMs: Number(sample.internalImportMs.toFixed(2)),
+            observableMs: Number(sample.observableMs.toFixed(2)),
+            workerCreationMs:
+              sample.workerCreationMs === null
+                ? null
+                : Number(sample.workerCreationMs.toFixed(2)),
+            postMessageCallMs:
+              sample.postMessageCallMs === null
+                ? null
+                : Number(sample.postMessageCallMs.toFixed(2)),
+            roundTripMs:
+              sample.roundTripMs === null
+                ? null
+                : Number(sample.roundTripMs.toFixed(2)),
+            analyzeMs: Number(sample.analyzeMs.toFixed(2)),
+            importLongestTaskMs:
+              sample.importLongestTaskMs === null
+                ? null
+                : Number(sample.importLongestTaskMs.toFixed(2)),
+            analyzeLongestTaskMs:
+              sample.analyzeLongestTaskMs === null
+                ? null
+                : Number(sample.analyzeLongestTaskMs.toFixed(2)),
+          })),
+          errorChecks: {
+            missingResponseTimedOut: noResponseWasHandled,
+            invalidZipError: invalidExchange.response.ok
+              ? null
+              : invalidExchange.response.error,
+            oversizedError: oversizedExchange.response.ok
+              ? null
+              : oversizedExchange.response.error,
+            validRetrySucceeded: recovered.response.ok,
+          },
+          workerCreationWarmMs: Number(warmWorker.readyMs.toFixed(2)),
+          functionalResultsIdentical: true,
+        };
+      },
+      {
+        scenarioName: fixture.name,
+        expectedCounts: archive.counts,
+        oversizedBytes: oversizedZipBytes,
+      },
+    );
+
+    const expectedResult = {
+      followers: archive.counts.followers,
+      following: archive.counts.following,
+      mutuals: archive.counts.mutuals,
+      notBack: archive.counts.notBack,
+      fans: archive.counts.followers - archive.counts.mutuals,
+    };
+    for (const sample of results.samples) {
+      expect(sample.counts).toEqual(expectedResult);
+      measurements.push({
+        scenario: fixture.name,
+        archiveBytes: archive.archiveBytes,
+        uncompressedBytes: archive.uncompressedBytes,
+        compression: archive.compression,
+        sample,
+      });
+    }
+    expect(results.errorChecks.invalidZipError).not.toBeNull();
+    expect(results.errorChecks.oversizedError).not.toBeNull();
+    expect(results.errorChecks.missingResponseTimedOut).toBe(true);
+    expect(results.errorChecks.validRetrySucceeded).toBe(true);
+    expect(results.functionalResultsIdentical).toBe(true);
+    console.log(
+      JSON.stringify({
+        scenario: fixture.name,
+        syntheticOnly: true,
+        nodeVersion: process.version,
+        chromiumVersion: page.context().browser()?.version() ?? 'unknown',
+        archiveBytes: archive.archiveBytes,
+        compressedRelationshipBytes: archive.compressedBytes,
+        uncompressedRelationshipBytes: archive.uncompressedBytes,
+        expectedCounts: archive.counts,
+        workerCreationWarmMs: results.workerCreationWarmMs,
+        samples: results.samples,
+        errorChecks: {
+          missingResponseTimedOut: results.errorChecks.missingResponseTimedOut,
+          invalidZipRejectedWithoutPartialResult: true,
+          oversizedZipRejectedWithoutPartialResult: true,
+          validRetrySucceededAfterFailures: true,
+        },
+        timingNote:
+          'Main internalImportMs is browser-side importFiles wall time. Worker internalImportMs is measured inside the worker; observableMs is page-side worker round trip or cold creation-through-result. postMessageCallMs is synchronous dispatch only, not a transfer-duration estimate. File is structured-cloned, not transferred as a full ZIP buffer; result arrays are cloned back. Analyze is measured on the main thread after each import. Heap values are optional Chromium JS-heap snapshots, not peak or process memory. Dashboard React updates are not part of this non-production harness.',
+      }),
+    );
+  }
+  expect(measurements).toHaveLength(45);
+  assertNoExternalTrafficOrErrors(signals);
+});
+
 test('measures a valid import at the cumulative 30 MiB boundary and compares compression methods', async ({
   page,
 }) => {
