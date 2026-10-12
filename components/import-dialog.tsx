@@ -121,6 +121,12 @@ export function ImportDialog({
         const imported = await importFiles(files);
         processed = { imported };
       }
+      if (
+        import.meta.env.DEV &&
+        typeof window !== 'undefined' &&
+        window.__followLensWorkerE2E?.profileEnabled
+      )
+        window.__followLensWorkerE2E.importResultReceivedAt = performance.now();
       if (benchmark) {
         if (!processed.metrics)
           throw new Error('Benchmark processing metrics are unavailable.');

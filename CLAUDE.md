@@ -32,6 +32,7 @@ Operational adapter for Claude Code. FollowLens uses a single source of truth ar
 - `npm run benchmark:importer:optimization`: Compare the current importer with a benchmark-only direct-Set parser prototype.
 - `npm run benchmark:importer:crc32`: Compare production CRC32 with an isolated slicing-by-8 benchmark candidate.
 - `npm run benchmark:importer:worker`: Compare main-thread imports with an isolated Worker; optional diagnostic only.
+- `npm run benchmark:importer:render`: Profile React dashboard subtrees and a real filter interaction; opt-in development-server benchmark only.
 - `npm run profile:importer:browser`: Profile repeated medium/near-limit imports through Chrome DevTools Protocol.
 - `npm run typecheck`: Strict TypeScript check (`tsc --noEmit`).
 - `npm run build`: Production compilation (`vinext build`).

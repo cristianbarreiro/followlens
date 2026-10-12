@@ -2572,7 +2572,7 @@ test('benchmarks importer worker responsiveness against main-thread import', asy
   assertNoExternalTrafficOrErrors(signals);
 });
 
-test('benchmarks end-to-end Worker import, analysis, and React dashboard responsiveness', async ({
+test('benchmarks end-to-end Worker import, analysis, React dashboard responsiveness, and dashboard rendering costs', async ({
   page,
 }) => {
   test.setTimeout(1_200_000);
@@ -2628,11 +2628,23 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
       mode: 'main-thread',
       operationStartedAt: null,
       dashboardPresentedAt: null,
+      dashboardFrameAt: null,
+      dashboardSecondFrameAt: null,
       analysisMs: null,
       recordAnalysisDuration: (durationMs) => {
         if (bridge.operationStartedAt !== null) bridge.analysisMs = durationMs;
       },
       pipelineMetrics: null,
+      profileEnabled: false,
+      reactProfiles: [],
+      importResultReceivedAt: null,
+      stateUpdateStartedAt: null,
+      stateUpdateEnqueuedAt: null,
+      derivedListSamples: [],
+      interactionStartedAt: null,
+      interactionTargetGroup: null,
+      interactionReactCommittedAt: null,
+      interactionSecondFrameAt: null,
       interactionProbeAt: null,
       memoryBeforeBytes: null,
       frameTimes,
@@ -2881,8 +2893,7 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
         await dialog.getByRole('checkbox').first().check();
       await page.evaluate(() => {
         const bridge = window.__followLensWorkerE2E;
-        if (!bridge)
-          throw new Error('Benchmark instrumentation is missing.');
+        if (!bridge) throw new Error('Benchmark instrumentation is missing.');
         const probe = document.createElement('button');
         probe.type = 'button';
         probe.textContent = 'Responsiveness probe';
@@ -2901,6 +2912,18 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
         if (!bridge)
           throw new Error('Benchmark instrumentation is unavailable.');
         bridge.mode = selectedMode as typeof bridge.mode;
+        bridge.profileEnabled = true;
+        bridge.reactProfiles = [];
+        bridge.importResultReceivedAt = null;
+        bridge.stateUpdateStartedAt = null;
+        bridge.stateUpdateEnqueuedAt = null;
+        bridge.derivedListSamples = [];
+        bridge.dashboardFrameAt = null;
+        bridge.dashboardSecondFrameAt = null;
+        bridge.interactionStartedAt = null;
+        bridge.interactionTargetGroup = null;
+        bridge.interactionReactCommittedAt = null;
+        bridge.interactionSecondFrameAt = null;
         bridge.interactionProbeAt = null;
         bridge.memoryBeforeBytes =
           (
@@ -2910,7 +2933,9 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
           ).memory?.usedJSHeapSize ?? null;
       }, mode);
       const operationHarnessStart = nodePerformance.now();
-      await dialog.getByRole('button', { name: 'Analizar importación' }).click();
+      await dialog
+        .getByRole('button', { name: 'Analizar importación' })
+        .click();
       const interactionPromise = (async () => {
         await page.waitForTimeout(20);
         const clickStartedAt = nodePerformance.now();
@@ -2928,15 +2953,15 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
       await expect(
         page.getByRole('status').filter({ hasText: 'Importación lista.' }),
       ).toBeVisible({ timeout: 30_000 });
-      await page.waitForFunction(
-        () => {
-          const bridge = window.__followLensWorkerE2E;
-          return Boolean(
-            bridge?.lastDashboard &&
-              bridge.dashboardPresentedAt !== null,
-          );
-        },
-      );
+      await page.waitForFunction(() => {
+        const bridge = window.__followLensWorkerE2E;
+        return Boolean(
+          bridge?.lastDashboard &&
+          bridge.dashboardPresentedAt !== null &&
+          bridge.dashboardFrameAt !== null &&
+          bridge.dashboardSecondFrameAt !== null,
+        );
+      });
       const interactionClickMs = await interactionPromise;
       const actualCounts = await assertDashboardCounts(page, archive.counts);
       expect(actualCounts).toEqual(archive.counts);
@@ -2947,6 +2972,11 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
           !bridge ||
           bridge.operationStartedAt === null ||
           bridge.dashboardPresentedAt === null ||
+          bridge.dashboardFrameAt === null ||
+          bridge.dashboardSecondFrameAt === null ||
+          bridge.importResultReceivedAt === null ||
+          bridge.stateUpdateStartedAt === null ||
+          bridge.stateUpdateEnqueuedAt === null ||
           !bridge.lastDashboard ||
           !bridge.pipelineMetrics
         ) {
@@ -2996,8 +3026,9 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
         if (!firstPageMatches)
           throw new Error('Rendered dashboard rows differ from analyzed data.');
         const endAt = bridge.dashboardPresentedAt;
+        const secondFrameAt = bridge.dashboardSecondFrameAt;
         const frameTimes = bridge.frameTimes.filter(
-          (time) => time >= bridge.operationStartedAt! && time <= endAt,
+          (time) => time >= bridge.operationStartedAt! && time <= secondFrameAt,
         );
         const frameGaps: number[] = [];
         let previousFrame = bridge.operationStartedAt;
@@ -3017,9 +3048,31 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
           ? state.longTasks.filter(
               (task) =>
                 task.startTime >= bridge.operationStartedAt! &&
-                task.startTime < endAt,
+                task.startTime < secondFrameAt,
             )
           : null;
+        const profiles = bridge.reactProfiles
+          .filter((sample) => sample.commitTime <= endAt)
+          .map((sample) => ({
+            id: sample.id,
+            phase: sample.phase,
+            actualDurationMs: sample.actualDuration,
+            baseDurationMs: sample.baseDuration,
+            startOffsetMs: sample.startTime - bridge.operationStartedAt!,
+            commitOffsetMs: sample.commitTime - bridge.operationStartedAt!,
+          }));
+        const derivedSamples = bridge.derivedListSamples
+          .filter((sample) => sample.at <= secondFrameAt)
+          .map((sample) => ({
+            group: sample.group,
+            durationMs: sample.durationMs,
+            count: sample.count,
+            offsetMs: sample.at - bridge.operationStartedAt!,
+          }));
+        const longTaskDurations = (from: number, to: number) =>
+          tasks
+            ?.filter((task) => task.startTime >= from && task.startTime < to)
+            .map((task) => task.duration) ?? null;
         const heapBytes = () =>
           (
             performance as Performance & {
@@ -3035,6 +3088,17 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
           roundTripMs: metrics.roundTripMs,
           postMessageCallMs: metrics.postMessageCallMs,
           dashboardMs: endAt - bridge.operationStartedAt,
+          resultReceivedMs:
+            bridge.importResultReceivedAt - bridge.operationStartedAt,
+          stateQueueMs:
+            bridge.stateUpdateEnqueuedAt - bridge.stateUpdateStartedAt,
+          resultToStateQueueMs:
+            bridge.stateUpdateStartedAt - bridge.importResultReceivedAt,
+          stateUpdateEnqueueToEffectMs: endAt - bridge.stateUpdateEnqueuedAt,
+          dashboardFirstFrameMs:
+            bridge.dashboardFrameAt - bridge.operationStartedAt,
+          dashboardSecondFrameMs:
+            bridge.dashboardSecondFrameAt - bridge.operationStartedAt,
           interactionProbeOffsetMs:
             bridge.interactionProbeAt === null
               ? null
@@ -3042,6 +3106,14 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
           frameCount: frameTimes.length,
           maxFrameGapMs: Math.max(...frameGaps),
           longTaskCount: tasks?.length ?? null,
+          longTasksBeforeCommitMs: longTaskDurations(
+            bridge.operationStartedAt,
+            endAt,
+          ),
+          longTasksAfterCommitBeforeInteractionMs: longTaskDurations(
+            endAt,
+            secondFrameAt,
+          ),
           longestLongTaskMs: tasks?.length
             ? Math.max(...tasks.map((task) => task.duration))
             : tasks
@@ -3049,6 +3121,8 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
               : null,
           memoryBeforeBytes: bridge.memoryBeforeBytes,
           memoryAfterBytes: heapBytes(),
+          reactProfiles: profiles,
+          derivedListSamples: derivedSamples,
           counts: {
             followers: dashboard.snapshot.followers.length,
             following: dashboard.snapshot.following.length,
@@ -3058,9 +3132,98 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
           },
         };
       });
+      const groupPicker = page.getByRole('combobox', {
+        name: 'Filtrar relaciones',
+      });
+      await groupPicker.click();
+      await page.evaluate(() => {
+        const bridge = window.__followLensWorkerE2E;
+        if (!bridge) throw new Error('Benchmark bridge is unavailable.');
+        bridge.interactionStartedAt = performance.now();
+        bridge.interactionTargetGroup = 'followers';
+        bridge.interactionReactCommittedAt = null;
+        bridge.interactionSecondFrameAt = null;
+      });
+      const userInteractionStartedAt = nodePerformance.now();
+      await page.getByRole('option', { name: /^Seguidores ·/ }).click();
+      const expectedFooter = `1–12 de ${fixture.followerCount.toLocaleString('es-UY')} cuentas`;
+      await expect(
+        page.locator('[aria-label="Listado de cuentas"] .table-footer > span'),
+      ).toHaveText(expectedFooter);
+      await page.waitForFunction(() => {
+        const bridge = window.__followLensWorkerE2E;
+        return Boolean(bridge && bridge.interactionSecondFrameAt !== null);
+      });
+      const userInteractionMs =
+        nodePerformance.now() - userInteractionStartedAt;
+      const interactionMetrics = await page.evaluate(() => {
+        const bridge = window.__followLensWorkerE2E;
+        if (
+          !bridge ||
+          bridge.interactionStartedAt === null ||
+          bridge.interactionReactCommittedAt === null ||
+          bridge.interactionSecondFrameAt === null ||
+          !bridge.lastDashboard
+        )
+          throw new Error('Dashboard interaction was not measured.');
+        const expectedRows = bridge.lastDashboard.data.followers.slice(0, 12);
+        const rows = [
+          ...document.querySelectorAll(
+            '[aria-label="Listado de cuentas"] tbody tr',
+          ),
+        ].map((row) => row.querySelector('strong')?.textContent ?? '');
+        const rowsMatch =
+          rows.length === expectedRows.length &&
+          rows.every((name, index) => name === `@${expectedRows[index]}`);
+        if (!rowsMatch)
+          throw new Error(
+            'Dashboard filter rows do not match the selected group.',
+          );
+        return {
+          reactCommitMs:
+            bridge.interactionReactCommittedAt - bridge.interactionStartedAt,
+          twoRafMs:
+            bridge.interactionSecondFrameAt - bridge.interactionStartedAt,
+          rowCount: rows.length,
+          reactProfiles: bridge.reactProfiles
+            .filter(
+              (sample) =>
+                sample.commitTime >= bridge.interactionStartedAt! &&
+                sample.commitTime <= bridge.interactionSecondFrameAt!,
+            )
+            .map((sample) => ({
+              id: sample.id,
+              phase: sample.phase,
+              actualDurationMs: sample.actualDuration,
+              baseDurationMs: sample.baseDuration,
+            })),
+          derivedListSamples: bridge.derivedListSamples
+            .filter((sample) => sample.at >= bridge.interactionStartedAt!)
+            .map((sample) => ({
+              group: sample.group,
+              durationMs: sample.durationMs,
+              count: sample.count,
+            })),
+        };
+      });
+      expect(
+        browserMetrics.reactProfiles.some(
+          (sample) => sample.id === 'relationship-list',
+        ),
+      ).toBe(true);
+      expect(
+        interactionMetrics.reactProfiles.some(
+          (sample) => sample.id === 'relationship-list',
+        ),
+      ).toBe(true);
+      expect(interactionMetrics.twoRafMs).toBeGreaterThanOrEqual(
+        interactionMetrics.reactCommitMs,
+      );
       return {
         ...browserMetrics,
         interactionClickMs,
+        userInteractionMs,
+        interactionMetrics,
         harnessToDashboardMs: nodePerformance.now() - operationHarnessStart,
       };
     };
@@ -3173,28 +3336,68 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
     });
     expect(lifecycle.terminatedWorkers).toBe(6);
     const sanitizedSamples = samples.map((sample) => {
+      const round = (value: number) => Number(value.toFixed(2));
       return {
         ...sample,
-        importMs: Number(sample.importMs.toFixed(2)),
+        importMs: round(sample.importMs),
         analysisMs:
-          sample.analysisMs === null
-            ? null
-            : Number(sample.analysisMs.toFixed(2)),
-        dashboardMs: Number(sample.dashboardMs.toFixed(2)),
+          sample.analysisMs === null ? null : round(sample.analysisMs),
+        dashboardMs: round(sample.dashboardMs),
+        resultReceivedMs: round(sample.resultReceivedMs),
+        stateQueueMs: round(sample.stateQueueMs),
+        resultToStateQueueMs: round(sample.resultToStateQueueMs),
+        stateUpdateEnqueueToEffectMs: round(
+          sample.stateUpdateEnqueueToEffectMs,
+        ),
+        dashboardFirstFrameMs: round(sample.dashboardFirstFrameMs),
+        dashboardSecondFrameMs: round(sample.dashboardSecondFrameMs),
         roundTripMs:
-          sample.roundTripMs === null
-            ? null
-            : Number(sample.roundTripMs.toFixed(2)),
-        interactionClickMs: Number(sample.interactionClickMs.toFixed(2)),
+          sample.roundTripMs === null ? null : round(sample.roundTripMs),
+        interactionClickMs: round(sample.interactionClickMs),
+        userInteractionMs: round(sample.userInteractionMs),
         interactionProbeOffsetMs:
           sample.interactionProbeOffsetMs === null
             ? null
-            : Number(sample.interactionProbeOffsetMs.toFixed(2)),
-        maxFrameGapMs: Number(sample.maxFrameGapMs.toFixed(2)),
+            : round(sample.interactionProbeOffsetMs),
+        maxFrameGapMs: round(sample.maxFrameGapMs),
         longestLongTaskMs:
           sample.longestLongTaskMs === null
             ? null
-            : Number(sample.longestLongTaskMs.toFixed(2)),
+            : round(sample.longestLongTaskMs),
+        longTasksBeforeCommitMs:
+          sample.longTasksBeforeCommitMs?.map(round) ?? null,
+        longTasksAfterCommitBeforeInteractionMs:
+          sample.longTasksAfterCommitBeforeInteractionMs?.map(round) ?? null,
+        reactProfiles: sample.reactProfiles.map((profile) => ({
+          ...profile,
+          actualDurationMs: round(profile.actualDurationMs),
+          baseDurationMs: round(profile.baseDurationMs),
+          startOffsetMs: round(profile.startOffsetMs),
+          commitOffsetMs: round(profile.commitOffsetMs),
+        })),
+        derivedListSamples: sample.derivedListSamples.map((derived) => ({
+          ...derived,
+          durationMs: round(derived.durationMs),
+          offsetMs: round(derived.offsetMs),
+        })),
+        interactionMetrics: {
+          ...sample.interactionMetrics,
+          reactCommitMs: round(sample.interactionMetrics.reactCommitMs),
+          twoRafMs: round(sample.interactionMetrics.twoRafMs),
+          reactProfiles: sample.interactionMetrics.reactProfiles.map(
+            (profile) => ({
+              ...profile,
+              actualDurationMs: round(profile.actualDurationMs),
+              baseDurationMs: round(profile.baseDurationMs),
+            }),
+          ),
+          derivedListSamples: sample.interactionMetrics.derivedListSamples.map(
+            (derived) => ({
+              ...derived,
+              durationMs: round(derived.durationMs),
+            }),
+          ),
+        },
       };
     });
     const errorChecks = {
@@ -3222,7 +3425,7 @@ test('benchmarks end-to-end Worker import, analysis, and React dashboard respons
             : Number(lifecycle.warmWorkerReadyMs.toFixed(2)),
         errorChecks,
         samples: sanitizedSamples,
-        note: 'Dashboard latency ends after real React dashboard selectors and rendered first-page names match the app state. Main analysis is timed around production analyze in Home; Worker analysis uses the same production function inside the Worker. Interaction latency is a Playwright click on a temporary accessible test probe mounted in the real app document; it measures browser input response, not an application action handler. Frame intervals are requestAnimationFrame opportunities, not confirmed paints. Heap is optional Chromium JS heap, not process or peak memory. Main-thread and Worker variants use identical synthetic archive bytes; no imported names or lists are logged.',
+        note: 'React Profiler reports actual/base subtree durations and commit times. Stage timestamps bracket result receipt, synchronous state-update scheduling, the dashboard useEffect marker and two requestAnimationFrame opportunities; frames are not confirmed physical paints. The product interaction opens the real relationship filter and verifies the selected group, row contents and 12-row pagination; browser-internal commit/frame latencies and Playwright-observed wall latency are separate. The temporary probe is auxiliary only. Heap is optional Chromium JS heap, not process or peak memory. Main-thread and Worker variants use identical synthetic archive bytes; no imported names or lists are logged.',
       }),
     );
     await page.goto('about:blank');

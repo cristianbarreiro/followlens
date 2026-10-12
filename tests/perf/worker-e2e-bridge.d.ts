@@ -10,8 +10,32 @@ declare global {
       processFiles: ImportPipeline;
       operationStartedAt: number | null;
       dashboardPresentedAt: number | null;
+      dashboardFrameAt: number | null;
+      dashboardSecondFrameAt: number | null;
       analysisMs: number | null;
       recordAnalysisDuration: (durationMs: number) => void;
+      profileEnabled: boolean;
+      reactProfiles: Array<{
+        id: string;
+        phase: 'mount' | 'update' | 'nested-update';
+        actualDuration: number;
+        baseDuration: number;
+        startTime: number;
+        commitTime: number;
+      }>;
+      importResultReceivedAt: number | null;
+      stateUpdateStartedAt: number | null;
+      stateUpdateEnqueuedAt: number | null;
+      derivedListSamples: Array<{
+        at: number;
+        durationMs: number;
+        group: Group;
+        count: number;
+      }>;
+      interactionStartedAt: number | null;
+      interactionTargetGroup: Group | null;
+      interactionReactCommittedAt: number | null;
+      interactionSecondFrameAt: number | null;
       memoryBeforeBytes: number | null;
       pipelineMetrics: {
         mode: 'main-thread' | 'worker-warm' | 'worker-cold';
