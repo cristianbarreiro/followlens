@@ -42,12 +42,15 @@ type RelationshipCounts = {
   mutuals: number;
   notBack: number;
 };
+type ZipCompression = 'deflate' | 'store';
 
 type SyntheticArchive = {
   buffer: Buffer;
   archiveBytes: number;
   compressedBytes: number;
   uncompressedBytes: number;
+  compression: ZipCompression;
+  compressionMethod: 0 | 8;
   counts: RelationshipCounts;
 };
 
@@ -118,6 +121,7 @@ function record(value: string) {
 function makeRelationshipZip(
   followers: string[],
   following: string[],
+  compression: ZipCompression = 'deflate',
 ): SyntheticArchive {
   const followerBytes = strToU8(JSON.stringify(followers.map(record)));
   const followingBytes = strToU8(
@@ -125,18 +129,32 @@ function makeRelationshipZip(
       relationships_following: following.map(record),
     }),
   );
-  const archive = zipSync({
-    'connections/followers_and_following/followers_1.json': followerBytes,
-    'connections/followers_and_following/following.json': followingBytes,
-  });
+  const archive = zipSync(
+    {
+      'connections/followers_and_following/followers_1.json': followerBytes,
+      'connections/followers_and_following/following.json': followingBytes,
+    },
+    { level: compression === 'store' ? 0 : 6 },
+  );
   const followingSet = new Set(following);
   const mutuals = followers.filter((name) => followingSet.has(name)).length;
-  const compressedBytes = inspectArchive(archive).compressedBytes;
+  const metadata = inspectArchive(archive);
+  const expectedMethod = compression === 'store' ? 0 : 8;
+  if (
+    metadata.relevantEntries !== 2 ||
+    metadata.compressionMethods.some((method) => method !== expectedMethod)
+  ) {
+    throw new Error(
+      `Synthetic ${compression.toUpperCase()} ZIP does not declare the expected method.`,
+    );
+  }
   return {
     buffer: Buffer.from(archive),
     archiveBytes: archive.byteLength,
-    compressedBytes,
+    compressedBytes: metadata.compressedBytes,
     uncompressedBytes: followerBytes.byteLength + followingBytes.byteLength,
+    compression,
+    compressionMethod: expectedMethod,
     counts: {
       followers: followers.length,
       following: following.length,
@@ -150,6 +168,7 @@ function inspectArchive(archive: Uint8Array): {
   compressedBytes: number;
   uncompressedBytes: number;
   relevantEntries: number;
+  compressionMethods: number[];
 } {
   const view = new DataView(
     archive.buffer,
@@ -173,6 +192,7 @@ function inspectArchive(archive: Uint8Array): {
   let compressedBytes = 0;
   let uncompressedBytes = 0;
   let relevantEntries = 0;
+  const compressionMethods: number[] = [];
   while (cursor < centralEnd) {
     if (view.getUint32(cursor, true) !== 0x02014b50)
       throw new Error('Synthetic benchmark ZIP has an invalid central entry.');
@@ -188,15 +208,24 @@ function inspectArchive(archive: Uint8Array): {
       compressedBytes += compressedSize;
       uncompressedBytes += uncompressedSize;
       relevantEntries += 1;
+      compressionMethods.push(view.getUint16(cursor + 10, true));
     }
     cursor += 46 + nameLength + extraLength + commentLength;
   }
   if (cursor !== centralEnd)
     throw new Error('Synthetic benchmark ZIP central directory is incomplete.');
-  return { compressedBytes, uncompressedBytes, relevantEntries };
+  return {
+    compressedBytes,
+    uncompressedBytes,
+    relevantEntries,
+    compressionMethods,
+  };
 }
 
-function makeBudgetZip(totalUncompressedBytes: number): SyntheticArchive {
+function makeBudgetZip(
+  totalUncompressedBytes: number,
+  compression: ZipCompression = 'deflate',
+): SyntheticArchive {
   const followersBase = JSON.stringify([record('scale_follower')]);
   const followingJson = JSON.stringify({ relationships_following: [] });
   const followingBytes = strToU8(followingJson);
@@ -226,15 +255,20 @@ function makeBudgetZip(totalUncompressedBytes: number): SyntheticArchive {
     throw new Error('Synthetic budget payload does not match importer schemas.');
   }
 
-  const archive = zipSync({
-    'connections/followers_and_following/followers_1.json': followerBytes,
-    'connections/followers_and_following/following.json': followingBytes,
-  });
+  const archive = zipSync(
+    {
+      'connections/followers_and_following/followers_1.json': followerBytes,
+      'connections/followers_and_following/following.json': followingBytes,
+    },
+    { level: compression === 'store' ? 0 : 6 },
+  );
   const metadata = inspectArchive(archive);
+  const expectedMethod = compression === 'store' ? 0 : 8;
   if (
     metadata.relevantEntries !== 2 ||
     metadata.uncompressedBytes !== totalUncompressedBytes ||
-    metadata.compressedBytes > MAX_COMPRESSED_TOTAL
+    metadata.compressedBytes > MAX_COMPRESSED_TOTAL ||
+    metadata.compressionMethods.some((method) => method !== expectedMethod)
   ) {
     throw new Error('Synthetic budget ZIP does not match importer limits.');
   }
@@ -244,11 +278,13 @@ function makeBudgetZip(totalUncompressedBytes: number): SyntheticArchive {
     archiveBytes: archive.byteLength,
     compressedBytes: metadata.compressedBytes,
     uncompressedBytes: metadata.uncompressedBytes,
+    compression,
+    compressionMethod: expectedMethod,
     counts: { followers: 1, following: 0, mutuals, notBack: 0 },
   };
 }
 
-function mediumArchive(): SyntheticArchive {
+function mediumArchive(compression: ZipCompression): SyntheticArchive {
   const followerCount = 5_000;
   const followingCount = 4_000;
   const mutualCount = 2_500;
@@ -263,7 +299,7 @@ function mediumArchive(): SyntheticArchive {
       (_, index) => `n${String(index).padStart(5, '0')}`,
     ),
   ];
-  const archive = makeRelationshipZip(followers, following);
+  const archive = makeRelationshipZip(followers, following, compression);
   if (
     archive.counts.followers !== followerCount ||
     archive.counts.following !== followingCount ||
@@ -296,6 +332,112 @@ async function openImportDialog(
   await dialog.getByLabel('Tu usuario').fill('browser_benchmark');
   await dialog.getByLabel('Fecha de la exportación').fill(importDate);
   await dialog.getByRole('checkbox').first().check();
+}
+
+async function measureInstrumentedImport(
+  page: Page,
+  archive: SyntheticArchive,
+  scenario: string,
+): Promise<void> {
+  const result = await page.evaluate(async () => {
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Archivos de Instagram"]',
+    );
+    const file = input?.files?.[0];
+    if (!file) throw new Error('Synthetic benchmark file is not selected.');
+
+    const importerUrl = new URL('/lib/importer.ts', location.origin).href;
+    const relationshipsUrl = new URL(
+      '/lib/relationships.ts',
+      location.origin,
+    ).href;
+    const { importFiles } = await import(/* @vite-ignore */ importerUrl);
+    const { analyze } = await import(/* @vite-ignore */ relationshipsUrl);
+    const measurements: {
+      stage: string;
+      durationMs: number;
+      counters?: Record<string, number>;
+    }[] = [];
+    const startedAt = performance.now();
+    const imported = await importFiles(
+      [file],
+      (measurement: {
+        stage: string;
+        durationMs: number;
+        counters?: Record<string, number>;
+      }) => measurements.push(measurement),
+    );
+    const importWallMs = performance.now() - startedAt;
+
+    const analyzeStartedAt = performance.now();
+    const relationships = analyze({
+      id: 'synthetic-browser-benchmark',
+      account: 'synthetic',
+      date: '2020-01-02',
+      importedAt: '2020-01-02T00:00:00.000Z',
+      followers: imported.followers,
+      following: imported.following,
+    });
+    const analyzeWallMs = performance.now() - analyzeStartedAt;
+    return {
+      importWallMs,
+      analyzeWallMs,
+      measurements,
+      counts: {
+        followers: imported.followers.length,
+        following: imported.following.length,
+        mutuals: relationships.mutuals.length,
+        notBack: relationships.notBack.length,
+      },
+    };
+  });
+  expect(result.counts).toEqual(archive.counts);
+
+  const stages = new Map<
+    string,
+    { calls: number; durationMs: number; counters: Record<string, number> }
+  >();
+  for (const measurement of result.measurements) {
+    const stage = stages.get(measurement.stage) ?? {
+      calls: 0,
+      durationMs: 0,
+      counters: {},
+    };
+    stage.calls++;
+    stage.durationMs += measurement.durationMs;
+    for (const [counter, value] of Object.entries(measurement.counters ?? {}))
+      stage.counters[counter] = (stage.counters[counter] ?? 0) + value;
+    stages.set(measurement.stage, stage);
+  }
+
+  console.log(
+    JSON.stringify({
+      scenario,
+      run: 'instrumented-browser-importFiles',
+      syntheticOnly: true,
+      compression: archive.compression,
+      declaredZipMethod: archive.compressionMethod,
+      archiveBytes: archive.archiveBytes,
+      relevantCompressedBytes: archive.compressedBytes,
+      relevantUncompressedBytes: archive.uncompressedBytes,
+      instrumentedImportWallMs: Number(result.importWallMs.toFixed(2)),
+      analyzeWallMs: Number(result.analyzeWallMs.toFixed(2)),
+      expectedCounts: archive.counts,
+      actualCounts: result.counts,
+      stages: Object.fromEntries(
+        [...stages].map(([name, stage]) => [
+          name,
+          {
+            calls: stage.calls,
+            durationMs: Number(stage.durationMs.toFixed(2)),
+            counters: stage.counters,
+          },
+        ]),
+      ),
+      note:
+        'Stage clocks run in Chromium; instrumentation and callbacks add overhead. Overlapping measurements (DEFLATE and output collection) must not be summed.',
+    }),
+  );
 }
 
 async function installBrowserMetrics(page: Page): Promise<void> {
@@ -655,6 +797,8 @@ function logMetrics(
       archiveBytes: archive.archiveBytes,
       relevantCompressedBytes: archive.compressedBytes,
       relevantUncompressedBytes: archive.uncompressedBytes,
+      compression: archive.compression,
+      declaredZipMethod: archive.compressionMethod,
       expectedCounts: archive.counts,
       actualCounts,
       ...measurements,
@@ -728,62 +872,85 @@ function jsonZip(followers: string[], following: string[]): SyntheticArchive {
   return makeRelationshipZip(followers, following);
 }
 
-test('measures medium synthetic relationship import in Chromium', async ({
+test('measures medium synthetic relationship import and compares compression methods', async ({
   page,
 }) => {
   const signals = await preparePage(page);
-  const archive = mediumArchive();
   const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
-  await openImportDialog(page, dialog, archive, 'synthetic-medium.zip');
+  const compressionVariants: ZipCompression[] =
+    process.env.FOLLOWLENS_CPU_PROFILE === '1'
+      ? ['deflate']
+      : ['deflate', 'store'];
+  for (const compression of compressionVariants) {
+    const archive = mediumArchive(compression);
+    const scenario = `medium-json-${compression}-zip-ui`;
+    await openImportDialog(
+      page,
+      dialog,
+      archive,
+      `synthetic-medium-${compression}.zip`,
+    );
+    await measureInstrumentedImport(page, archive, scenario);
 
-  const profiled = await submitAndWaitForOutcome(page, dialog);
-  await expect(dialog).toBeHidden();
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Importación lista.' }),
-  ).toBeVisible();
-  const measurements = await readBrowserMetrics(page, 'success');
-  const actualCounts = await assertDashboardCounts(page, archive.counts);
-  logMetrics(
-    'medium-json-zip-ui',
-    page,
-    archive,
-    measurements,
-    profiled.harnessObservedMs,
-    actualCounts,
-  );
-  logCpuProfile('medium-json-zip-ui', profiled.profileSummary);
+    const profiled = await submitAndWaitForOutcome(page, dialog);
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Importación lista.' }),
+    ).toBeVisible();
+    const measurements = await readBrowserMetrics(page, 'success');
+    const actualCounts = await assertDashboardCounts(page, archive.counts);
+    logMetrics(
+      scenario,
+      page,
+      archive,
+      measurements,
+      profiled.harnessObservedMs,
+      actualCounts,
+    );
+    logCpuProfile(scenario, profiled.profileSummary);
+  }
   assertNoExternalTrafficOrErrors(signals);
 });
 
-test('measures a valid import at the cumulative 30 MiB boundary', async ({
+test('measures a valid import at the cumulative 30 MiB boundary and compares compression methods', async ({
   page,
 }) => {
   const signals = await preparePage(page);
-  const archive = makeBudgetZip(MAX_JSON_TOTAL);
-  expect(archive.uncompressedBytes).toBe(MAX_JSON_TOTAL);
-  expect(archive.compressedBytes).toBeLessThanOrEqual(MAX_COMPRESSED_TOTAL);
   const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
-  await openImportDialog(page, dialog, archive, 'synthetic-exact-limit.zip');
+  const compressionVariants: ZipCompression[] =
+    process.env.FOLLOWLENS_CPU_PROFILE === '1'
+      ? ['deflate']
+      : ['deflate', 'store'];
+  for (const compression of compressionVariants) {
+    const archive = makeBudgetZip(MAX_JSON_TOTAL, compression);
+    expect(archive.uncompressedBytes).toBe(MAX_JSON_TOTAL);
+    expect(archive.compressedBytes).toBeLessThanOrEqual(MAX_COMPRESSED_TOTAL);
+    const scenario = `cumulative-30-mib-valid-${compression}-zip-ui`;
+    await openImportDialog(
+      page,
+      dialog,
+      archive,
+      `synthetic-exact-limit-${compression}.zip`,
+    );
+    await measureInstrumentedImport(page, archive, scenario);
 
-  const profiled = await submitAndWaitForOutcome(page, dialog);
-  await expect(dialog).toBeHidden();
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Importación lista.' }),
-  ).toBeVisible();
-  const measurements = await readBrowserMetrics(page, 'success');
-  const actualCounts = await assertDashboardCounts(page, archive.counts);
-  logMetrics(
-    'cumulative-30-mib-valid-json-zip-ui',
-    page,
-    archive,
-    measurements,
-    profiled.harnessObservedMs,
-    actualCounts,
-  );
-  logCpuProfile(
-    'cumulative-30-mib-valid-json-zip-ui',
-    profiled.profileSummary,
-  );
+    const profiled = await submitAndWaitForOutcome(page, dialog);
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Importación lista.' }),
+    ).toBeVisible();
+    const measurements = await readBrowserMetrics(page, 'success');
+    const actualCounts = await assertDashboardCounts(page, archive.counts);
+    logMetrics(
+      scenario,
+      page,
+      archive,
+      measurements,
+      profiled.harnessObservedMs,
+      actualCounts,
+    );
+    logCpuProfile(scenario, profiled.profileSummary);
+  }
   assertNoExternalTrafficOrErrors(signals);
 });
 

@@ -6,6 +6,13 @@ export const MAX_COMPRESSED_TOTAL = 30 * 1024 * 1024; // 30 MiB acumulados compr
 export const MAX_CENTRAL_DIR_SIZE = 16 * 1024 * 1024; // 16 MiB presupuesto para directorio central
 export const MAX_RELEVANT_ENTRIES = 1000; // Máximo de entradas relacionales seleccionadas
 
+export type ImportStageMeasurement = {
+  stage: string;
+  durationMs: number;
+  counters?: Record<string, number>;
+};
+export type ImportDiagnostics = (measurement: ImportStageMeasurement) => void;
+
 export const EOCD_SIGNATURE = 0x06054b50;
 export const ZIP64_LOCATOR_SIGNATURE = 0x07064b50;
 export const CENTRAL_HEADER_SIGNATURE = 0x02014b50;
@@ -38,6 +45,23 @@ export interface ZipSource {
   ): Blob | { arrayBuffer(): Promise<ArrayBuffer> };
 }
 
+async function readTimedRange(
+  source: ZipSource,
+  start: number,
+  end: number,
+  stage: string,
+  diagnostics: ImportDiagnostics,
+): Promise<ArrayBuffer> {
+  const startedAt = performance.now();
+  const buffer = await source.slice(start, end).arrayBuffer();
+  diagnostics({
+    stage,
+    durationMs: performance.now() - startedAt,
+    counters: { bytesRead: buffer.byteLength, rangesRead: 1 },
+  });
+  return buffer;
+}
+
 export interface CentralDirectoryEntry {
   name: string;
   flag: number;
@@ -55,12 +79,15 @@ export interface CentralDirectoryEntry {
 export function decompressDeflate(
   compressed: Uint8Array,
   maxOutputBytes: number,
+  diagnostics?: ImportDiagnostics,
 ): Uint8Array {
   const chunks: Uint8Array[] = [];
   let totalDecompressed = 0;
+  let outputCollectionMs = 0;
   let abortError: Error | null = null;
 
   const inflator = new Inflate((chunk) => {
+    const collectionStart = diagnostics ? performance.now() : 0;
     totalDecompressed += chunk.length;
     if (totalDecompressed > maxOutputBytes) {
       abortError = new Error(
@@ -69,9 +96,12 @@ export function decompressDeflate(
       throw abortError;
     }
     chunks.push(chunk);
+    if (diagnostics)
+      outputCollectionMs += performance.now() - collectionStart;
   });
 
   const CHUNK_SIZE = 16384;
+  const deflateStart = diagnostics ? performance.now() : 0;
   try {
     if (compressed.length === 0) {
       inflator.push(new Uint8Array(0), true);
@@ -91,12 +121,45 @@ export function decompressDeflate(
     throw new Error('No se pudo abrir el ZIP. Puede estar dañado o protegido.');
   }
 
+  if (diagnostics)
+    diagnostics({
+      stage: 'deflate-sync',
+      durationMs: performance.now() - deflateStart,
+      counters: {
+        compressedBytes: compressed.byteLength,
+        inputChunks: Math.max(1, Math.ceil(compressed.byteLength / CHUNK_SIZE)),
+        outputBlocks: chunks.length,
+        outputBytes: totalDecompressed,
+      },
+    });
+  if (diagnostics)
+    diagnostics({
+      stage: 'inflate-output-collection',
+      durationMs: outputCollectionMs,
+      counters: { outputBlocks: chunks.length, outputBytes: totalDecompressed },
+    });
+
+  const allocationStart = diagnostics ? performance.now() : 0;
   const result = new Uint8Array(totalDecompressed);
+  if (diagnostics)
+    diagnostics({
+      stage: 'decompressed-buffer-allocation',
+      durationMs: performance.now() - allocationStart,
+      counters: { outputBytes: totalDecompressed },
+    });
+
+  const assemblyStart = diagnostics ? performance.now() : 0;
   let offset = 0;
   for (const chunk of chunks) {
     result.set(chunk, offset);
     offset += chunk.length;
   }
+  if (diagnostics)
+    diagnostics({
+      stage: 'decompressed-buffer-assembly',
+      durationMs: performance.now() - assemblyStart,
+      counters: { outputBlocks: chunks.length, outputBytes: offset },
+    });
   return result;
 }
 
@@ -107,6 +170,7 @@ export function decompressDeflate(
 export async function readZipSelective(
   source: ZipSource,
   isRelevant: (path: string) => boolean,
+  diagnostics?: ImportDiagnostics,
 ): Promise<Record<string, Uint8Array>> {
   if (source.size < 22) {
     throw new Error('No se pudo abrir el ZIP. Puede estar dañado o protegido.');
@@ -115,9 +179,15 @@ export async function readZipSelective(
   // 1. Localizar el registro EOCD en los últimos 65.557 bytes (22 fijo + 65.535 comentario máx)
   const searchLength = Math.min(source.size, 65557);
   const searchStart = source.size - searchLength;
-  const searchBuffer = await source
-    .slice(searchStart, source.size)
-    .arrayBuffer();
+  const searchBuffer = diagnostics
+    ? await readTimedRange(
+        source,
+        searchStart,
+        source.size,
+        'zip-read-eocd-range',
+        diagnostics,
+      )
+    : await source.slice(searchStart, source.size).arrayBuffer();
   const searchView = new DataView(searchBuffer);
 
   let eocdRel = -1;
@@ -152,9 +222,17 @@ export async function readZipSelective(
     if (eocdRel >= 20) {
       locatorBuf = searchBuffer.slice(eocdRel - 20, eocdRel);
     } else {
-      locatorBuf = await source
-        .slice(eocdFileOffset - 20, eocdFileOffset)
-        .arrayBuffer();
+      locatorBuf = diagnostics
+        ? await readTimedRange(
+            source,
+            eocdFileOffset - 20,
+            eocdFileOffset,
+            'zip-read-zip64-locator',
+            diagnostics,
+          )
+        : await source
+            .slice(eocdFileOffset - 20, eocdFileOffset)
+            .arrayBuffer();
     }
     const locView = new DataView(locatorBuf);
     if (locView.getUint32(0, true) === ZIP64_LOCATOR_SIGNATURE) {
@@ -195,9 +273,15 @@ export async function readZipSelective(
   }
 
   // 4. Lectura e inspección del Directorio Central
-  const cdBuffer = await source
-    .slice(cdOffset, cdOffset + cdSize)
-    .arrayBuffer();
+  const cdBuffer = diagnostics
+    ? await readTimedRange(
+        source,
+        cdOffset,
+        cdOffset + cdSize,
+        'zip-read-central-directory',
+        diagnostics,
+      )
+    : await source.slice(cdOffset, cdOffset + cdSize).arrayBuffer();
   const cdView = new DataView(cdBuffer);
   let cursor = 0;
   let parsedCount = 0;
@@ -316,9 +400,17 @@ export async function readZipSelective(
       );
     }
 
-    const lfhBuffer = await source
-      .slice(entry.localOffset, entry.localOffset + 30)
-      .arrayBuffer();
+    const lfhBuffer = diagnostics
+      ? await readTimedRange(
+          source,
+          entry.localOffset,
+          entry.localOffset + 30,
+          'zip-read-local-header',
+          diagnostics,
+        )
+      : await source
+          .slice(entry.localOffset, entry.localOffset + 30)
+          .arrayBuffer();
     const lfhView = new DataView(lfhBuffer);
     if (lfhView.getUint32(0, true) !== LOCAL_HEADER_SIGNATURE) {
       throw new Error('Firma de encabezado local inválida.');
@@ -379,9 +471,20 @@ export async function readZipSelective(
 
     const lfhNameBuf =
       lfhFnLen > 0
-        ? await source
-            .slice(entry.localOffset + 30, entry.localOffset + 30 + lfhFnLen)
-            .arrayBuffer()
+        ? diagnostics
+          ? await readTimedRange(
+              source,
+              entry.localOffset + 30,
+              entry.localOffset + 30 + lfhFnLen,
+              'zip-read-local-name',
+              diagnostics,
+            )
+          : await source
+              .slice(
+                entry.localOffset + 30,
+                entry.localOffset + 30 + lfhFnLen,
+              )
+              .arrayBuffer()
         : new ArrayBuffer(0);
     const lfhName = new TextDecoder('utf-8').decode(new Uint8Array(lfhNameBuf));
     const normLfhName = lfhName.replaceAll('\\', '/').toLowerCase();
@@ -402,9 +505,17 @@ export async function readZipSelective(
       );
     }
 
-    const dataBuffer = await source
-      .slice(dataOffset, dataOffset + entry.compressedSize)
-      .arrayBuffer();
+    const dataBuffer = diagnostics
+      ? await readTimedRange(
+          source,
+          dataOffset,
+          dataOffset + entry.compressedSize,
+          'zip-read-entry-data',
+          diagnostics,
+        )
+      : await source
+          .slice(dataOffset, dataOffset + entry.compressedSize)
+          .arrayBuffer();
     const compressedBytes = new Uint8Array(dataBuffer);
 
     let decompressed: Uint8Array;
@@ -419,7 +530,11 @@ export async function readZipSelective(
       }
       decompressed = compressedBytes;
     } else {
-      decompressed = decompressDeflate(compressedBytes, entryBudget);
+      decompressed = decompressDeflate(
+        compressedBytes,
+        entryBudget,
+        diagnostics,
+      );
     }
 
     if (decompressed.length !== entry.uncompressedSize) {
@@ -428,7 +543,15 @@ export async function readZipSelective(
       );
     }
 
-    if (crc32(decompressed) !== entry.crc32) {
+    const crcStart = diagnostics ? performance.now() : 0;
+    const actualCrc = crc32(decompressed);
+    if (diagnostics)
+      diagnostics({
+        stage: 'crc32',
+        durationMs: performance.now() - crcStart,
+        counters: { inputBytes: decompressed.byteLength },
+      });
+    if (actualCrc !== entry.crc32) {
       throw new Error(
         `Error de integridad (CRC32) en ${entryBase}. El archivo ZIP puede estar dañado.`,
       );
