@@ -10,7 +10,7 @@ tags:
   - vinext
   - oxlint
   - verification
-timestamp: '2026-10-11T18:40:00-03:00'
+timestamp: '2026-10-11T21:49:00-03:00'
 lifecycle: stable
 ---
 
@@ -35,6 +35,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | `npm run test:e2e`  | Ejecuta regresiones de importación en Chromium real.      | Playwright Test                                   | Inicia Vinext local; requiere Chromium instalado. |
 | `npm run benchmark:importer` | Mide escenarios sintéticos del pipeline de importación. | Node.js 24 + `--expose-gc` | Opt-in; informa tiempos y snapshots aproximados de memoria, sin umbrales. |
 | `npm run benchmark:importer:browser` | Mide importaciones sintéticas medianas y cercanas al límite en Chromium. | Playwright Test + Chromium | Ejecución independiente; no forma parte de `test:e2e`. |
+| `npm run profile:importer:browser` | Perfila el hot path ZIP en Chromium mediante CDP. | Playwright + Chrome DevTools Protocol | Opt-in, 2 repeticiones por carga; no guarda perfiles crudos. |
 | `npm run typecheck` | Verifica tipos TypeScript sin emitir archivos.            | `tsc --noEmit`                                    | Validación estricta con TypeScript 5.9.           |
 | `npm run format`    | Formatea el código fuente del proyecto.                   | `oxfmt`                                           | Formateador ultrarrápido basado en Rust.          |
 | `npm run lint`      | Ejecuta el análisis estático de código.                   | `oxlint`                                          | Véase Sección 4 para diagnóstico de linter.       |
@@ -135,6 +136,27 @@ El intervalo Chromium empieza en el evento real del botón de análisis y termin
 La corrida evidencia una tarea larga reproducible en el import válido de 30 MiB (la corrida final observó una de 456 ms; otra corrida previa registró 566 ms), aunque los datos relacionales son solo un registro y el parsing JSON instrumentado suma 22,1 ms. Por tanto, la cardinalidad de relaciones y el render de miles de filas no explican ese caso; el coste restante está en el procesamiento previo/alrededor del parseo (lectura selectiva, DEFLATE, CRC, decodificación y actualización de estado), que esta línea de base no separa por función. Es una pausa perceptible posible en el hilo principal al importar una entrada cerca del presupuesto, no un umbral universal. No se cambió producción: esta medición no identifica cuál subetapa del procesamiento debe optimizarse, y una intervención en descompresión o verificación sin perfilado de esa etapa arriesgaría las defensas de recursos e integridad. El exceso de 1 byte se rechaza antes de parsear y permite una importación válida posterior.
 
 La comprobación de solicitudes del benchmark solo permite HTTP/WebSocket del origen local de la app; en los cuatro flujos no se detectaron solicitudes externas ni errores de consola/página. Las métricas son de Chromium real pero de una sola máquina/corrida final, no representan todos los dispositivos; para el proceso Node y sus etapas aisladas, usá por separado `npm run benchmark:importer`. Ninguna lectura o medición usa datos reales.
+
+### Profiling CPU de importación ZIP en Chromium (Fase 11)
+
+Ejecutá `npm run profile:importer:browser` con Node.js 24+ y Chromium instalado. El comando inicia un config Playwright independiente, usa el mismo generador de ZIP sintéticos y perfiles dos veces el caso mediano de Fase 10 y dos veces el ZIP JSON válido de 30 MiB acumulados. No incluye el exceso de 1 byte en el perfil (permanece cubierto como regresión funcional en `npm run benchmark:importer:browser`), y no altera `npm test` ni `npm run test:e2e`.
+
+Playwright abre una sesión CDP por escenario y habilita `Profiler` con intervalo nominal de 1 ms justo antes del click real del botón; la captura se detiene al observar el resultado UI. El script solo imprime un resumen agregado de nodos muestreados (función, ruta fuente y línea, self/inclusive, caller y proporción); nunca escribe perfiles crudos ni contenido de archivos al disco. `selfMs` es tiempo exclusivo muestreado de la función. `inclusiveMs` agrega sus descendientes y se solapa entre ancestros/descendientes; **no se suma a los valores self**. Los porcentajes usan el total de `timeDeltas` observado durante la captura, que contiene tiempo inactivo y actividad adyacente del harness además del procesamiento; no es el tiempo total de importación. El intervalo `appElapsedMs` de Chromium y el tiempo del harness se reportan aparte. El profiling añade sobrecarga y no sustituye al benchmark no instrumentado.
+
+En Windows, Node.js 24.16.0 / Chromium 156.0.8078.4, una ejecución final tras corregir la agregación de tiempos inclusivos registró:
+
+| Escenario y corrida | `appElapsedMs` | Ventana perfil muestreada / muestras | Funciones con mayor self observado |
+|---|---:|---:|---|
+| Mediano, 1 | 207,4 ms | 489,33 ms / 276 | `Inflate.c` 11,58 ms (2,4%); `inflt` 5,52 ms (1,1%); `JSON.parse` 5,10 ms (1,0%); `crc32` 4,42 ms (0,9%) |
+| Mediano, 2 | 200,2 ms | 462,40 ms / 255 | `JSON.parse` 8,16 ms (1,8%); `inflt` 7,75 ms (1,7%); `crc32` 5,56 ms (1,2%); `Inflate.c` 2,01 ms (0,4%) |
+| 30 MiB, 1 | 852,4 ms | 1.237,46 ms / 584 | `inflt` 266,89 ms (21,6%); `crc32` 114,36 ms (9,2%); `Inflate.c` 94,89 ms (7,7%); `JSON.parse` 28,32 ms (2,3%) |
+| 30 MiB, 2 | 593,8 ms | 847,05 ms / 429 | `inflt` 181,56 ms (21,4%); `crc32` 105,89 ms (12,5%); `Inflate.c` 45,49 ms (5,4%); `JSON.parse` 26,03 ms (3,1%) |
+
+En el caso exacto al límite, `decompressDeflate` tuvo ~21–30 ms self y ~308–495 ms inclusive; `readZipSelective` tuvo 0–2 ms self y ~420–614 ms inclusive. Esas cifras inclusive incluyen descendientes (por ejemplo, inflater y CRC), no representan costes adicionales. Las rutinas `cbuf` (29–53 ms) y `slc` (21–30 ms) de `fflate` también aparecieron repetidamente, asociadas a bloques y cortes del inflater. La llamada nativa `decode` de V8 fue de ~28–39 ms y el árbol la atribuye a `strFromU8` en `fflate`; `crc32` se atribuye a `readZipSelective`. En el caso mediano, `parseRelationships` y `normalize` tuvieron pocos milisegundos self y `analyze` no tuvo muestras self suficientes para estimar su coste.
+
+La asignación/copia al buffer final de descompresión no aparece como una función con muestras atribuibles en este perfil; no se infiere su coste a partir de `Uint8Array.set` ni de funciones inclusivas. La ruta EOCD/directorio central tampoco aparece como gran coste self. El perfil identifica un hot path concreto en DEFLATE de `fflate` y `crc32`, pero no separa con precisión todo el coste de gestión de buffers: el `timeDeltas` total de captura excedió el intervalo app medido (capturas de límite: 847–1.237 ms vs. 594–852 ms), y los perfiles tienen dispersión de muestreo. Los porcentajes listados son solo respecto de la ventana perfilada completa, con harness/inactividad incluidos. No sumes self e inclusive ni interpretes esas muestras como tiempos de pared exactos. Los valores inclusive ya están agregados desde muestras self de cada nodo hacia sus ancestros; no son mediciones directas ni benchmarks de pared.
+
+La medición sin profiling de Fase 10 permanece como referencia independiente (251,6 ms mediano y 680,6 ms al límite); las corridas nuevas son instrumentadas y no deben reemplazarla. En estas capturas el caso límite siguió produciendo tres tareas largas (máximos observados 416–613 ms). Con dos repeticiones y una ventana CDP contaminada por actividad del harness, la evidencia atribuye muestras self repetidas a `inflt` (181,56–266,89 ms; 21,4–21,6% de la ventana), `crc32` (105,89–114,36 ms; 9,2–12,5%) y `Inflate.c` (45,49–94,89 ms; 5,4–7,7%). Es evidencia de coste muestreado en el hot path, no atribución exacta del tiempo de pared ni base suficiente para seleccionar una optimización segura o estimar ahorro end-to-end. Por eso no se modificó producción. El siguiente experimento mínimo es un perfil controlado por marcadores internos temporales (sin cambiar límites ni resultados) que separe: inflado, ensamblado de chunks, CRC y UTF-8; luego comparar con el mismo ZIP usando una entrada STORE sintética equivalente para aislar DEFLATE. Mantener ese experimento en una fase aparte antes de tocar algoritmos.
 
 ---
 

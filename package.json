@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "benchmark:importer": "node --expose-gc scripts/importer-benchmark.ts",
     "benchmark:importer:browser": "playwright test --config=playwright.browser-benchmark.config.ts",
+    "profile:importer:browser": "node scripts/profile-importer-browser.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

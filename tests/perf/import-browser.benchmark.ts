@@ -51,6 +51,29 @@ type SyntheticArchive = {
   counts: RelationshipCounts;
 };
 
+type CpuProfileNode = {
+  id: number;
+  callFrame: {
+    functionName: string;
+    url: string;
+    lineNumber: number;
+    columnNumber: number;
+  };
+  children?: number[];
+};
+type CpuProfile = {
+  nodes: CpuProfileNode[];
+  samples?: number[];
+  timeDeltas?: number[];
+};
+type CpuProfileRow = {
+  functionName: string;
+  source: string;
+  line: number;
+  selfMs: number;
+  inclusiveMs: number;
+};
+
 function isLocalAppTraffic(url: URL): boolean {
   return (
     url.hostname === appAddress.hostname &&
@@ -429,10 +452,190 @@ async function readBrowserMetrics(
   }, expectedOutcome);
 }
 
+function summarizeCpuProfile(profile: CpuProfile) {
+  const selfByNode = new Map<number, number>();
+  let sampledCpuMs = 0;
+  for (let index = 0; index < (profile.samples?.length ?? 0); index++) {
+    const deltaMs = (profile.timeDeltas?.[index] ?? 0) / 1000;
+    const nodeId = profile.samples![index];
+    selfByNode.set(nodeId, (selfByNode.get(nodeId) ?? 0) + deltaMs);
+    sampledCpuMs += deltaMs;
+  }
+
+  const nodesById = new Map(profile.nodes.map((node) => [node.id, node]));
+  const parentById = new Map<number, number>();
+  for (const node of profile.nodes)
+    for (const child of node.children ?? []) parentById.set(child, node.id);
+
+  const sourcePath = (node: CpuProfileNode) =>
+    node.callFrame.url
+      ? new URL(node.callFrame.url, appAddress).pathname
+      : '(V8 runtime)';
+  const frameKey = (node: CpuProfileNode) =>
+    `${node.callFrame.functionName}|${sourcePath(node)}|${node.callFrame.lineNumber + 1}`;
+  const callersByFrame = new Map<string, Set<string>>();
+  for (const node of profile.nodes) {
+    if (!(selfByNode.get(node.id) ?? 0)) continue;
+    const parent = nodesById.get(parentById.get(node.id) ?? -1);
+    if (!parent) continue;
+    const callers = callersByFrame.get(frameKey(node)) ?? new Set<string>();
+    callers.add(`${parent.callFrame.functionName || '(anonymous)'} ${sourcePath(parent)}`);
+    callersByFrame.set(frameKey(node), callers);
+  }
+
+  const rows = new Map<string, CpuProfileRow>();
+  const ensureRow = (node: CpuProfileNode) => {
+    const { functionName, lineNumber } = node.callFrame;
+    const source = sourcePath(node);
+    const key = frameKey(node);
+    const row = rows.get(key) ?? {
+      functionName: functionName || '(anonymous)',
+      source,
+      line: lineNumber + 1,
+      selfMs: 0,
+      inclusiveMs: 0,
+    };
+    rows.set(key, row);
+    return row;
+  };
+
+  for (const node of profile.nodes) {
+    ensureRow(node).selfMs += selfByNode.get(node.id) ?? 0;
+  }
+
+  for (const node of profile.nodes) {
+    const selfMs = selfByNode.get(node.id) ?? 0;
+    if (!selfMs) continue;
+    let ancestorId: number | undefined = node.id;
+    while (ancestorId !== undefined) {
+      const ancestor = nodesById.get(ancestorId);
+      if (!ancestor) break;
+      ensureRow(ancestor).inclusiveMs += selfMs;
+      ancestorId = parentById.get(ancestorId);
+    }
+  }
+
+  const allRows = [...rows.values()];
+  const topSelfRows = allRows.filter((row) => row.selfMs > 0);
+  const targets = allRows.filter((row) =>
+    (row.selfMs > 0 || row.inclusiveMs > 0) &&
+    /readZipSelective|decompressDeflate|crc32|strFromU8|parseRelationships|normalize|analyze|JSON\.parse|inflt|inflate|cbuf|slc|decode|sort/i.test(
+      row.functionName,
+    ),
+  );
+  return {
+    profiler: 'Chrome DevTools Protocol Profiler; sampled CPU time from timeDeltas',
+    sampleCount: profile.samples?.length ?? 0,
+    sampledProfileMs: Number(sampledCpuMs.toFixed(2)),
+    note: 'Self time is exclusive sampled time; inclusive time includes descendants. Percentages use the full sampled profile interval, including idle and harness scheduling, and inclusive values must not be added to self totals.',
+    targetFunctions: targets
+      .sort((a, b) => b.selfMs - a.selfMs)
+      .slice(0, 30)
+      .map((row) => ({
+        ...row,
+        callers: [...(callersByFrame.get(
+          `${row.functionName === '(anonymous)' ? '' : row.functionName}|${row.source}|${row.line}`,
+        ) ?? [])].slice(0, 5),
+        selfMs: Number(row.selfMs.toFixed(2)),
+        inclusiveMs: Number(row.inclusiveMs.toFixed(2)),
+        selfProfileIntervalPercent:
+          sampledCpuMs > 0
+            ? Number(((row.selfMs / sampledCpuMs) * 100).toFixed(1))
+            : 0,
+      })),
+    topSelfFunctions: topSelfRows
+      .sort((a, b) => b.selfMs - a.selfMs)
+      .slice(0, 20)
+      .map((row) => ({
+        ...row,
+        selfMs: Number(row.selfMs.toFixed(2)),
+        inclusiveMs: Number(row.inclusiveMs.toFixed(2)),
+        selfProfileIntervalPercent:
+          sampledCpuMs > 0
+            ? Number(((row.selfMs / sampledCpuMs) * 100).toFixed(1))
+            : 0,
+      })),
+  };
+}
+
+async function withOptionalCpuProfile<T>(
+  page: Page,
+  action: () => Promise<T>,
+): Promise<{ result: T; profileSummary: ReturnType<typeof summarizeCpuProfile> | null }> {
+  if (process.env.FOLLOWLENS_CPU_PROFILE !== '1')
+    return { result: await action(), profileSummary: null };
+
+  const session = await page.context().newCDPSession(page);
+  let profilerRunning = false;
+  try {
+    await session.send('Profiler.enable');
+    await session.send('Profiler.setSamplingInterval', { interval: 1000 });
+    await session.send('Profiler.start');
+    profilerRunning = true;
+    const result = await action();
+    const response = await session.send('Profiler.stop');
+    profilerRunning = false;
+    return {
+      result,
+      profileSummary: summarizeCpuProfile(response.profile as CpuProfile),
+    };
+  } finally {
+    if (profilerRunning) await session.send('Profiler.stop');
+    await session.send('Profiler.disable');
+    await session.detach();
+  }
+}
+
 async function beginImport(dialog: Locator): Promise<number> {
   const startedAt = nodePerformance.now();
   await dialog.getByRole('button', { name: 'Analizar importación' }).click();
   return startedAt;
+}
+
+async function submitAndWaitForOutcome(
+  page: Page,
+  dialog: Locator,
+): Promise<{ harnessObservedMs: number; profileSummary: ReturnType<typeof summarizeCpuProfile> | null }> {
+  const submitButton = dialog.getByRole('button', {
+    name: 'Analizar importación',
+  });
+  const profiling = process.env.FOLLOWLENS_CPU_PROFILE === '1';
+  if (profiling) await submitButton.scrollIntoViewIfNeeded();
+
+  const profiled = await withOptionalCpuProfile(page, async () => {
+    const harnessStart = nodePerformance.now();
+    if (profiling) {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll('button')].find(
+          (candidate) =>
+            candidate.textContent?.includes('Analizar importación'),
+        );
+        if (!button) throw new Error('Import submit button is not available.');
+        button.click();
+      });
+      await page.waitForFunction(
+        () => window.__followLensBenchmark?.outcome !== null,
+        null,
+        { timeout: 120_000 },
+      );
+    } else {
+      await submitButton.click();
+      await expect(dialog).toBeHidden();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Importación lista.' }),
+      ).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.__followLensBenchmark?.outcome ?? null),
+        )
+        .toBe('success');
+    }
+    return nodePerformance.now() - harnessStart;
+  });
+  return {
+    harnessObservedMs: profiled.result,
+    profileSummary: profiled.profileSummary,
+  };
 }
 
 function logMetrics(
@@ -464,6 +667,14 @@ function logMetrics(
         'performance.memory is optional, Chromium-specific JavaScript heap only; null means unavailable and is not process memory.',
     }),
   );
+}
+
+function logCpuProfile(
+  scenario: string,
+  profileSummary: ReturnType<typeof summarizeCpuProfile> | null,
+): void {
+  if (profileSummary)
+    console.log(JSON.stringify({ scenario, cpuProfile: profileSummary }));
 }
 
 async function assertDashboardCounts(
@@ -525,17 +736,11 @@ test('measures medium synthetic relationship import in Chromium', async ({
   const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
   await openImportDialog(page, dialog, archive, 'synthetic-medium.zip');
 
-  const harnessStart = await beginImport(dialog);
+  const profiled = await submitAndWaitForOutcome(page, dialog);
   await expect(dialog).toBeHidden();
   await expect(
     page.getByRole('status').filter({ hasText: 'Importación lista.' }),
   ).toBeVisible();
-  const harnessObservedMs = nodePerformance.now() - harnessStart;
-  await expect
-    .poll(() =>
-      page.evaluate(() => window.__followLensBenchmark?.outcome ?? null),
-    )
-    .toBe('success');
   const measurements = await readBrowserMetrics(page, 'success');
   const actualCounts = await assertDashboardCounts(page, archive.counts);
   logMetrics(
@@ -543,9 +748,10 @@ test('measures medium synthetic relationship import in Chromium', async ({
     page,
     archive,
     measurements,
-    harnessObservedMs,
+    profiled.harnessObservedMs,
     actualCounts,
   );
+  logCpuProfile('medium-json-zip-ui', profiled.profileSummary);
   assertNoExternalTrafficOrErrors(signals);
 });
 
@@ -559,17 +765,11 @@ test('measures a valid import at the cumulative 30 MiB boundary', async ({
   const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
   await openImportDialog(page, dialog, archive, 'synthetic-exact-limit.zip');
 
-  const harnessStart = await beginImport(dialog);
+  const profiled = await submitAndWaitForOutcome(page, dialog);
   await expect(dialog).toBeHidden();
   await expect(
     page.getByRole('status').filter({ hasText: 'Importación lista.' }),
   ).toBeVisible();
-  const harnessObservedMs = nodePerformance.now() - harnessStart;
-  await expect
-    .poll(() =>
-      page.evaluate(() => window.__followLensBenchmark?.outcome ?? null),
-    )
-    .toBe('success');
   const measurements = await readBrowserMetrics(page, 'success');
   const actualCounts = await assertDashboardCounts(page, archive.counts);
   logMetrics(
@@ -577,8 +777,12 @@ test('measures a valid import at the cumulative 30 MiB boundary', async ({
     page,
     archive,
     measurements,
-    harnessObservedMs,
+    profiled.harnessObservedMs,
     actualCounts,
+  );
+  logCpuProfile(
+    'cumulative-30-mib-valid-json-zip-ui',
+    profiled.profileSummary,
   );
   assertNoExternalTrafficOrErrors(signals);
 });

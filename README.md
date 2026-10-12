@@ -76,6 +76,9 @@ npm run benchmark:importer
 
 # Línea de base de escala en Chromium (instalar navegador con Playwright)
 npm run benchmark:importer:browser
+
+# Perfil opcional de CPU en Chromium (dos corridas por tamaño, resumen sin archivos)
+npm run profile:importer:browser
 ```
 
 - **Pruebas (`npm test`):** 34 tests unitarios nativos (`node:test`) que validan la suite completa: parsing HTML y JSON, extracción selectiva ZIP, defensas contra bombas de compresión, multipartes y álgebra relacional.
@@ -83,6 +86,7 @@ npm run benchmark:importer:browser
 - **Compilación (`npm run build`):** Generación limpia de bundles para producción con Vinext (Vite 8).
 - **Rendimiento (`npm run benchmark:importer`):** Escenarios sintéticos opt-in; informa tiempos y snapshots aproximados sin umbrales de CI.
 - **Escala en navegador (`npm run benchmark:importer:browser`):** Ejecución Playwright independiente para importar relaciones medianas y un payload JSON válido de 30 MiB, más el caso de límite excedido y recuperación; usa solo datos sintéticos y no forma parte de `npm run test:e2e`.
+- **Profiling de CPU (`npm run profile:importer:browser`):** Captura CDP opcional del flujo UI mediano y cercano al límite; imprime un resumen de funciones sin guardar perfiles crudos ni datos importados.
 - **Linter (`npm run lint`):** Análisis con `oxlint` (el núcleo del importador en `lib/` cuenta con 0 errores; las advertencias preexistentes se encuentran acotadas a componentes generados de UI y `node:test`, documentadas en [development.md](docs/knowledge/development.md)).
 
 ---
