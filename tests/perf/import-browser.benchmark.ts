@@ -1169,6 +1169,407 @@ test('benchmarks realistic high-cardinality relationship imports in Chromium', a
   assertNoExternalTrafficOrErrors(signals);
 });
 
+test('compares the current importer with the direct-set parser prototype', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  const signals = await preparePage(page);
+  const dialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
+  const scenarios = [
+    {
+      name: 'representative-medium',
+      followerCount: 5_000,
+      followingCount: 4_000,
+      mutualCount: 2_500,
+    },
+    {
+      name: 'high-cardinality',
+      followerCount: 30_000,
+      followingCount: 24_000,
+      mutualCount: 15_000,
+    },
+    {
+      name: 'largest-valid-near-limit',
+      followerCount: 114_000,
+      followingCount: 90_000,
+      mutualCount: 56_250,
+    },
+  ] as const;
+
+  for (const fixture of scenarios) {
+    const archive = realisticArchive(
+      fixture.followerCount,
+      fixture.followingCount,
+      fixture.mutualCount,
+      'deflate',
+    );
+    await openImportDialog(
+      page,
+      dialog,
+      archive,
+      `synthetic-optimization-${fixture.name}.zip`,
+    );
+
+    const measurements = await page.evaluate(async (expectedCounts) => {
+      const input = document.querySelector<HTMLInputElement>(
+        'input[aria-label="Archivos de Instagram"]',
+      );
+      const file = input?.files?.[0];
+      if (!file) throw new Error('Synthetic benchmark file is not selected.');
+
+      const importerUrl = new URL('/lib/importer.ts', location.origin).href;
+      const zipUrl = new URL('/lib/zip.ts', location.origin).href;
+      const relationshipsUrl = new URL(
+        '/lib/relationships.ts',
+        location.origin,
+      ).href;
+      const fflateUrl = new URL('/node_modules/fflate/esm/browser.js', location.origin)
+        .href;
+      const [
+        { importFiles },
+        { readZipSelective },
+        relationships,
+        { strFromU8 },
+      ] = await Promise.all([
+        import(/* @vite-ignore */ importerUrl),
+        import(/* @vite-ignore */ zipUrl),
+        import(/* @vite-ignore */ relationshipsUrl),
+        import(/* @vite-ignore */ fflateUrl),
+      ]);
+      const { fileInfo, normalize } = relationships;
+      type Imported = {
+        followers: string[];
+        following: string[];
+        fileCount: number;
+      };
+      type Measurement = {
+        stage: string;
+        durationMs: number;
+        counters?: Record<string, number>;
+      };
+      type Trial = {
+        variant: 'current' | 'direct-set-prototype';
+        durationMs: number;
+        stageDurations: Record<string, number>;
+        counts: { followers: number; following: number };
+        longTaskCount: number | null;
+        longestTaskMs: number | null;
+        heapBeforeBytes: number | null;
+        heapAfterBytes: number | null;
+      };
+
+      const aggregate = (stages: Measurement[]) =>
+        Object.fromEntries(
+          stages.reduce((totals, measurement) => {
+            totals.set(
+              measurement.stage,
+              (totals.get(measurement.stage) ?? 0) + measurement.durationMs,
+            );
+            return totals;
+          }, new Map<string, number>()),
+        );
+      const heapBytes = () =>
+        (
+          performance as Performance & {
+            memory?: { usedJSHeapSize: number };
+          }
+        ).memory?.usedJSHeapSize ?? null;
+      const readLongTasks = (start: number, end: number) => {
+        const state = window.__followLensBenchmark;
+        if (!state?.longTasksSupported) return null;
+        return state.longTasks.filter(
+          (task) => task.startTime >= start && task.startTime < end,
+        );
+      };
+      const summarize = (tasks: LongTaskSample[] | null) => ({
+        longTaskCount: tasks?.length ?? null,
+        longestTaskMs: tasks?.length
+          ? Number(Math.max(...tasks.map((task) => task.duration)).toFixed(2))
+          : tasks
+            ? 0
+            : null,
+      });
+
+      const parseInto = (
+        data: unknown,
+        kind: 'followers' | 'following',
+        target: Set<string>,
+      ) => {
+        const key =
+          kind === 'followers'
+            ? 'relationships_followers'
+            : 'relationships_following';
+        const rows = Array.isArray(data)
+          ? data
+          : data && typeof data === 'object'
+            ? (data as Record<string, unknown>)[key]
+            : undefined;
+        if (!Array.isArray(rows))
+          throw new Error('Synthetic relationship JSON schema is invalid.');
+        for (const value of rows) {
+          if (!value || typeof value !== 'object')
+            throw new Error('Synthetic relationship record is invalid.');
+          const row = value as Record<string, unknown>;
+          const records = Array.isArray(row.string_list_data)
+            ? row.string_list_data
+            : [];
+          const first = records[0] as
+            | { value?: unknown; href?: unknown }
+            | undefined;
+          let name = normalize(first?.value) ?? normalize(row.title);
+          if (!name && typeof first?.href === 'string') {
+            try {
+              const url = new URL(first.href);
+              if (
+                ['www.instagram.com', 'instagram.com'].includes(url.hostname)
+              ) {
+                const parts = url.pathname.split('/').filter(Boolean);
+                name = normalize(parts[0] === '_u' ? parts[1] : parts[0]);
+              }
+            } catch {
+              // Match the production parser's fallback behavior for invalid URLs.
+            }
+          }
+          if (!name)
+            throw new Error('Synthetic relationship username is invalid.');
+          target.add(name);
+        }
+      };
+
+      const current = async (): Promise<{
+        imported: Imported;
+        stages: Record<string, number>;
+      }> => {
+        const stages: Measurement[] = [];
+        const imported = await importFiles(
+          [file],
+          (measurement: Measurement) => stages.push(measurement),
+        );
+        return { imported, stages: aggregate(stages) };
+      };
+      const directSetPrototype = async (): Promise<{
+        imported: Imported;
+        stages: Record<string, number>;
+      }> => {
+        const stages: Measurement[] = [];
+        const imported: Imported = {
+          followers: [],
+          following: [],
+          fileCount: 0,
+        };
+        const names = {
+          followers: new Set<string>(),
+          following: new Set<string>(),
+        };
+        const totalStartedAt = performance.now();
+        const entries = await readZipSelective(
+          file,
+          (path: string) => fileInfo(path) !== null,
+          (measurement: Measurement) => stages.push(measurement),
+        );
+        let followersFound = false;
+        let followingFound = false;
+        for (const [path, rawBytes] of Object.entries(entries)) {
+          const info = fileInfo(path);
+          if (!info || info.format !== 'json')
+            throw new Error('Synthetic benchmark archive format is invalid.');
+          const kind = info.kind as 'followers' | 'following';
+          const bytes = rawBytes as Uint8Array;
+          const base = path.replaceAll('\\', '/').split('/').pop()!;
+          const decodeStartedAt = performance.now();
+          const jsonText = strFromU8(bytes).replace(/^\uFEFF/, '');
+          stages.push({
+            stage: 'utf8-decode',
+            durationMs: performance.now() - decodeStartedAt,
+            counters: { inputBytes: bytes.byteLength },
+          });
+          const parseStartedAt = performance.now();
+          const data: unknown = JSON.parse(jsonText);
+          stages.push({
+            stage: 'json-parse',
+            durationMs: performance.now() - parseStartedAt,
+            counters: { inputBytes: bytes.byteLength },
+          });
+          const transformStartedAt = performance.now();
+          parseInto(data, kind, names[kind]);
+          stages.push({
+            stage: 'direct-set-relationship-parse',
+            durationMs: performance.now() - transformStartedAt,
+            counters: { parsedRows: names[kind].size },
+          });
+          if (kind === 'followers') {
+            if (base !== 'followers_1.json')
+              throw new Error('Synthetic follower part is unexpected.');
+            followersFound = true;
+          } else {
+            if (base !== 'following.json')
+              throw new Error('Synthetic following filename is unexpected.');
+            followingFound = true;
+          }
+        }
+        if (!followersFound || !followingFound)
+          throw new Error('Synthetic benchmark lists are incomplete.');
+        const finalizeStartedAt = performance.now();
+        imported.followers = [...names.followers].sort();
+        imported.following = [...names.following].sort();
+        imported.fileCount = Object.keys(entries).length;
+        stages.push({
+          stage: 'direct-set-result-finalization',
+          durationMs: performance.now() - finalizeStartedAt,
+          counters: {
+            followers: imported.followers.length,
+            following: imported.following.length,
+            fileCount: imported.fileCount,
+          },
+        });
+        stages.push({
+          stage: 'direct-set-import-total',
+          durationMs: performance.now() - totalStartedAt,
+          counters: {
+            followers: imported.followers.length,
+            following: imported.following.length,
+            fileCount: imported.fileCount,
+          },
+        });
+        return { imported, stages: aggregate(stages) };
+      };
+
+      const sameResult = (left: Imported, right: Imported) =>
+        left.fileCount === right.fileCount &&
+        left.followers.length === right.followers.length &&
+        left.following.length === right.following.length &&
+        left.followers.every((name, index) => name === right.followers[index]) &&
+        left.following.every((name, index) => name === right.following[index]);
+      const counts = (imported: Imported) => {
+        const followingSet = new Set(imported.following);
+        const mutuals = imported.followers.filter((name) =>
+          followingSet.has(name),
+        ).length;
+        return {
+          followers: imported.followers.length,
+          following: imported.following.length,
+          mutuals,
+          notBack: imported.following.length - mutuals,
+        };
+      };
+      const assertExpectedCounts = (actual: ReturnType<typeof counts>) => {
+        if (
+          actual.followers !== expectedCounts.followers ||
+          actual.following !== expectedCounts.following ||
+          actual.mutuals !== expectedCounts.mutuals ||
+          actual.notBack !== expectedCounts.notBack
+        ) {
+          throw new Error('Importer variant returned unexpected relationship counts.');
+        }
+      };
+      const trials: Trial[] = [];
+      let reference: Imported | null = null;
+      const runCurrent = async () => {
+        const startedAt = performance.now();
+        const heapBeforeBytes = heapBytes();
+        const result = await current();
+        const finishedAt = performance.now();
+        const tasks = readLongTasks(startedAt, finishedAt);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const state = window.__followLensBenchmark;
+        if (state?.longTasksSupported) {
+          for (const task of state.observer?.takeRecords() ?? [])
+            state.longTasks.push({
+              startTime: task.startTime,
+              duration: task.duration,
+            });
+        }
+        const observedTasks = readLongTasks(startedAt, finishedAt) ?? tasks;
+        if (reference && !sameResult(reference, result.imported))
+          throw new Error('Current importer output changed between trials.');
+        reference ??= result.imported;
+        const actualCounts = counts(result.imported);
+        assertExpectedCounts(actualCounts);
+        return {
+          variant: 'current' as const,
+          durationMs: finishedAt - startedAt,
+          stageDurations: result.stages,
+          counts: actualCounts,
+          ...summarize(observedTasks),
+          heapBeforeBytes,
+          heapAfterBytes: heapBytes(),
+        };
+      };
+      const runPrototype = async () => {
+        const startedAt = performance.now();
+        const heapBeforeBytes = heapBytes();
+        const result = await directSetPrototype();
+        const finishedAt = performance.now();
+        const tasks = readLongTasks(startedAt, finishedAt);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const state = window.__followLensBenchmark;
+        if (state?.longTasksSupported) {
+          for (const task of state.observer?.takeRecords() ?? [])
+            state.longTasks.push({
+              startTime: task.startTime,
+              duration: task.duration,
+            });
+        }
+        const observedTasks = readLongTasks(startedAt, finishedAt) ?? tasks;
+        if (reference && !sameResult(reference, result.imported))
+          throw new Error('Prototype output differs from current importer.');
+        reference ??= result.imported;
+        const actualCounts = counts(result.imported);
+        assertExpectedCounts(actualCounts);
+        return {
+          variant: 'direct-set-prototype' as const,
+          durationMs: finishedAt - startedAt,
+          stageDurations: result.stages,
+          counts: actualCounts,
+          ...summarize(observedTasks),
+          heapBeforeBytes,
+          heapAfterBytes: heapBytes(),
+        };
+      };
+
+      await runCurrent();
+      await runPrototype();
+      for (let repetition = 0; repetition < 3; repetition++) {
+        const pair =
+          repetition % 2 === 0
+            ? [await runCurrent(), await runPrototype()]
+            : [await runPrototype(), await runCurrent()];
+        trials.push(...pair);
+      }
+      return trials.map((trial) => ({
+        ...trial,
+        durationMs: Number(trial.durationMs.toFixed(2)),
+        longestTaskMs:
+          trial.longestTaskMs === null
+            ? null
+            : Number(trial.longestTaskMs.toFixed(2)),
+      }));
+    }, archive.counts);
+
+    for (const trial of measurements)
+      console.log(
+        JSON.stringify({
+          scenario: `${fixture.name}-direct-set-parser-experiment`,
+          syntheticOnly: true,
+          nodeVersion: process.version,
+          chromiumVersion: page.context().browser()?.version() ?? 'unknown',
+          compression: archive.compression,
+          declaredZipMethod: archive.compressionMethod,
+          archiveBytes: archive.archiveBytes,
+          relevantCompressedBytes: archive.compressedBytes,
+          relevantUncompressedBytes: archive.uncompressedBytes,
+          expectedCounts: archive.counts,
+          actualCounts: trial.counts,
+          ...trial,
+          trialCountPerVariant: 3,
+          note:
+            'Import wall time and long tasks are measured inside Chromium; fixture construction is outside the timed interval. The prototype is benchmark-only and reuses the production ZIP reader, output limits, and CRC32.',
+        }),
+      );
+  }
+  assertNoExternalTrafficOrErrors(signals);
+});
+
 test('measures a valid import at the cumulative 30 MiB boundary and compares compression methods', async ({
   page,
 }) => {

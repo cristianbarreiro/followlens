@@ -92,6 +92,7 @@ Derived directly from `package.json`:
 | **Browser-scale benchmark** | `npm run benchmark:importer:browser` | Measure synthetic medium, high-cardinality and near-limit imports in Chromium. | Standalone opt-in run; includes limit rejection/recovery. |
 | **Browser stage comparison** | `npm run benchmark:importer:stages` | Compare DEFLATE/STORE and instrument browser import stages. | Two repetitions per synthetic scenario; opt-in, no thresholds. |
 | **Realistic browser benchmark** | `npm run benchmark:importer:realistic` | Compare high-cardinality official-schema JSON imports in Chromium. | Three scales and two repetitions; synthetic, opt-in, no thresholds. |
+| **Importer optimization experiment** | `npm run benchmark:importer:optimization` | Compare current import path with an isolated direct-Set parser prototype. | Three repetitions after warm-up at three scales; benchmark-only. |
 | **Browser CPU profile** | `npm run profile:importer:browser` | Profile medium and near-limit imports with CDP. | Standalone opt-in; summary only, no raw profile files. |
 | **Browser E2E** | `npm run test:e2e` | Run importer regressions in Chromium. | Install once with `npx playwright install chromium`. |
 | **Typecheck** | `npm run typecheck` | Run strict TypeScript validation. | `tsc --noEmit`. |
