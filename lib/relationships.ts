@@ -58,6 +58,60 @@ export function fileInfo(
 export function fileKind(path: string): FileKind | null {
   return fileInfo(path)?.kind ?? null;
 }
+
+export function selectZipRelationshipPaths(
+  paths: readonly string[],
+): ReadonlySet<string> {
+  const candidates = paths.filter((path) => fileKind(path) !== null);
+  const normalizedPaths = candidates.map((path) => ({
+    path,
+    segments: path
+      .replaceAll('\\', '/')
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => segment.toLowerCase()),
+  }));
+  const knownFolders = new Set<string>();
+
+  for (const { segments } of normalizedPaths) {
+    const parent = segments.slice(0, -1);
+    if (
+      parent.length >= 2 &&
+      parent.slice(-2).join('/') === 'connections/followers_and_following'
+    ) {
+      knownFolders.add(parent.join('/'));
+    }
+  }
+
+  if (knownFolders.size > 1) {
+    throw new Error(
+      'Hay varias carpetas de seguidores. Importá los datos de una sola cuenta.',
+    );
+  }
+
+  if (knownFolders.size === 1) {
+    const [knownFolder] = knownFolders;
+    return new Set(
+      normalizedPaths
+        .filter(
+          ({ segments }) => segments.slice(0, -1).join('/') === knownFolder,
+        )
+        .map(({ path }) => path),
+    );
+  }
+
+  const folders = new Set(
+    normalizedPaths.map(({ segments }) => segments.slice(0, -1).join('/')),
+  );
+  if (folders.size > 1) {
+    throw new Error(
+      'Hay varias carpetas con archivos relacionales. Importá los datos de una sola cuenta.',
+    );
+  }
+
+  return new Set(candidates);
+}
+
 export function parseRelationships(
   data: unknown,
   kind: 'followers' | 'following',

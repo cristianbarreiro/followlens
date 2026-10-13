@@ -965,6 +965,98 @@ test('importa ZIP con listas HTML validas y analiza relaciones correctamente', a
   assert.deepEqual(rels.fans, ['alice']);
 });
 
+void test('prioriza la carpeta relacional oficial e ignora following.html de Threads', async () => {
+  const followers = strToU8(
+    syntheticHtmlFollowers(['seguidor_valido', 'mutuo_valido']),
+  );
+  const following = strToU8(
+    syntheticHtmlFollowing([
+      { username: 'seguido_valido' },
+      { username: 'mutuo_valido' },
+    ]),
+  );
+  const threadsFollowing = strToU8(
+    syntheticHtmlFollowing([
+      { username: 'solo_threads' },
+      { username: 'mutuo_threads' },
+    ]),
+  );
+  const zip = buildSyntheticZip([
+    {
+      name: 'your_instagram_activity/threads/following.html',
+      data: threadsFollowing,
+      method: 8,
+    },
+    {
+      name: 'connections/followers_and_following/following.html',
+      data: following,
+      method: 8,
+    },
+    {
+      name: 'connections/followers_and_following/followers_1.html',
+      data: followers,
+      method: 8,
+    },
+  ]);
+
+  const result = await importFiles([
+    new File([zip as BlobPart], 'official_export.zip'),
+  ]);
+  assert.equal(result.fileCount, 2);
+  assert.deepEqual(result.followers, ['mutuo_valido', 'seguidor_valido']);
+  assert.deepEqual(result.following, ['mutuo_valido', 'seguido_valido']);
+  const relations = analyze(
+    snap('2026-10-10', result.followers, result.following),
+  );
+  assert.deepEqual(relations.mutuals, ['mutuo_valido']);
+  assert.deepEqual(relations.notBack, ['seguido_valido']);
+  assert.deepEqual(relations.fans, ['seguidor_valido']);
+});
+
+void test('no completa exportaciones incompletas con archivos relacionales ajenos a la carpeta oficial', async () => {
+  const followers = strToU8(syntheticHtmlFollowers(['seguidor_valido']));
+  const threadsFollowing = strToU8(
+    syntheticHtmlFollowing([{ username: 'solo_threads' }]),
+  );
+  const zip = buildSyntheticZip([
+    {
+      name: 'connections/followers_and_following/followers_1.html',
+      data: followers,
+      method: 8,
+    },
+    {
+      name: 'your_instagram_activity/threads/following.html',
+      data: threadsFollowing,
+      method: 8,
+    },
+  ]);
+
+  await assert.rejects(
+    importFiles([new File([zip as BlobPart], 'incomplete_export.zip')]),
+    /Necesitamos followers_1\.html.*following\.html/i,
+  );
+});
+
+void test('rechaza carpetas oficiales relacionales ambiguas', async () => {
+  const followers = strToU8(syntheticHtmlFollowers(['seguidor']));
+  const following = strToU8(syntheticHtmlFollowing([{ username: 'seguido' }]));
+  const zip = buildSyntheticZip([
+    {
+      name: 'account_a/connections/followers_and_following/followers_1.html',
+      data: followers,
+    },
+    {
+      name: 'account_b/connections/followers_and_following/following.html',
+      data: following,
+    },
+  ]);
+
+  await assert.rejects(
+    importFiles([new File([zip as BlobPart], 'ambiguous_export.zip')]),
+    /Hay varias carpetas de seguidores/i,
+  );
+});
+
 test('admite multipartes HTML de seguidores y detecta saltos secuenciales', async () => {
   const f1 = strToU8(syntheticHtmlFollowers(['u1', 'u2']));
   const f2 = strToU8(syntheticHtmlFollowers(['u3', 'u4']));
@@ -1068,6 +1160,25 @@ test('rechazo de importacion con formatos mezclados JSON y HTML', async () => {
 
   await assert.rejects(
     importFiles([new File([zipMixed as BlobPart], 'mixed_formats.zip')]),
+    /No mezcles archivos JSON y HTML/i,
+  );
+
+  const zipMixedInOfficialFolder = buildSyntheticZip([
+    {
+      name: 'connections/followers_and_following/followers_1.json',
+      data: fJson,
+      method: 8,
+    },
+    {
+      name: 'connections/followers_and_following/following.html',
+      data: folHtml,
+      method: 8,
+    },
+  ]);
+  await assert.rejects(
+    importFiles([
+      new File([zipMixedInOfficialFolder as BlobPart], 'mixed_official.zip'),
+    ]),
     /No mezcles archivos JSON y HTML/i,
   );
 });

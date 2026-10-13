@@ -171,6 +171,7 @@ export async function readZipSelective(
   source: ZipSource,
   isRelevant: (path: string) => boolean,
   diagnostics?: ImportDiagnostics,
+  selectRelevantPaths?: (paths: readonly string[]) => ReadonlySet<string>,
 ): Promise<Record<string, Uint8Array>> {
   if (source.size < 22) {
     throw new Error('No se pudo abrir el ZIP. Puede estar dañado o protegido.');
@@ -333,7 +334,13 @@ export async function readZipSelective(
   }
 
   // 5. Filtrado de entradas relevantes y validaciones de seguridad
-  const relevant = entries.filter((e) => isRelevant(e.name));
+  const candidates = entries.filter((e) => isRelevant(e.name));
+  const selectedPaths = selectRelevantPaths?.(
+    candidates.map((entry) => entry.name),
+  );
+  const relevant = selectedPaths
+    ? candidates.filter((entry) => selectedPaths.has(entry.name))
+    : candidates;
 
   if (relevant.length > MAX_RELEVANT_ENTRIES) {
     throw new Error('Los JSON superan el límite de 30 MB o 1.000 archivos.');

@@ -3,6 +3,7 @@ import {
   fileInfo,
   fileKind,
   parseRelationships,
+  selectZipRelationshipPaths,
   type FileFormat,
 } from './relationships.ts';
 import { parseHtmlRelationships } from './html-parser.ts';
@@ -30,6 +31,7 @@ export async function importFiles(
       zipped[0],
       (path) => fileKind(path) !== null,
       diagnostics,
+      selectZipRelationshipPaths,
     );
     Object.assign(entries, extracted);
   } else {

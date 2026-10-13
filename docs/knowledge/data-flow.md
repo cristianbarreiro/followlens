@@ -36,7 +36,10 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
      * Búsqueda de EOCD en los últimos 65.557 bytes
      * Detección y rechazo controlado de ZIP64 y multidisco
      * Lectura e inspección del Directorio Central (presupuesto ≤ 16 MB)
-     * Filtrado de entradas relacionales vía fileKind() (máx. 1.000 entradas)
+     * Filtrado de nombres relacionales vía fileKind() y selección contextual de rutas
+     * Prioridad a `connections/followers_and_following/`; descarta homónimos en otras secciones
+     * Sin esa ruta conocida, exige que todas las candidatas estén en una única carpeta
+     * Conserva el rechazo de colisiones dentro de la carpeta elegida y de varias carpetas ambiguas
      * Descarte completo de medios (fotos, vídeos, reels) y DMs sin leer sus bytes
      * Validación de cabeceras locales (LFH), offsets y descriptor de datos (bit 3)
      * Descompresión STORE / streaming DEFLATE acotada (≤ 30 MB por entrada y total)
@@ -47,7 +50,8 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
 3. Clasificación y Validación Estructural
    - fileInfo(): Identifica 'followers'/'following' y formato 'json'/'html'
    - Rechazo de formatos mezclados (no mezclar JSON y HTML en una misma exportación)
-   - Detección de colisiones de carpetas (mismo nombre base en diferentes rutas)
+   - Resolución contextual de carpetas relacionales ZIP antes de extraer sus bytes
+   - Rechazo de colisiones de nombres dentro de la carpeta elegida y de carpetas ambiguas
    - Extracción de índices de partes: followers_1, followers_2...
                 │
                 ▼

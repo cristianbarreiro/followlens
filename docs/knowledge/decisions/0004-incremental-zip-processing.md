@@ -138,7 +138,7 @@ La implementación actual de `lib/zip.ts` y `lib/importer.ts` cumple con los sig
 
 ### 4.7. Anomalías de Seguridad
 
-- **Nombres duplicados / colisión de carpetas:** Si se encuentran entradas que colisionan en su nombre base (e.g. `followers_1.json` en dos directorios internos diferentes), abortar con error de cuentas múltiples.
+- **Resolución contextual y colisión de carpetas:** Si existe `connections/followers_and_following/`, solo se seleccionan desde esa carpeta los archivos relacionales y se ignoran homónimos de otras secciones (por ejemplo, `your_instagram_activity/threads/following.html`). Se rechazan varias carpetas conocidas y duplicados de nombre base dentro de la carpeta elegida. Si no existe la ruta conocida, solo se acepta una única carpeta con candidatos relacionales; varias carpetas se consideran ambiguas y abortan la importación.
 - **Rutas ambiguas / Path Traversal:** Normalizar rutas ignorando separadores (`/` vs `\`). La lectura opera exclusivamente en memoria sin escribir al sistema de archivos local.
 - **Protección Zip-Bomb:** Limitar el tamaño descompreso a un máximo de 30 MB por entrada JSON individual (`uncompressedSize > 30 MB` o buffer descomprimido excedido).
 
