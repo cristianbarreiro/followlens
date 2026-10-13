@@ -70,11 +70,33 @@ npm run typecheck
 
 # Compilación de producción
 npm run build
+
+# Línea de base de rendimiento local (datos sintéticos, Node.js 24+)
+npm run benchmark:importer
+
+# Línea de base de escala en Chromium (instalar navegador con Playwright)
+npm run benchmark:importer:browser
+
+# Comparación DEFLATE/STORE y etapas instrumentadas (dos repeticiones)
+npm run benchmark:importer:stages
+npm run benchmark:importer:realistic
+npm run benchmark:importer:optimization
+npm run benchmark:importer:crc32
+
+# Perfil opcional de CPU en Chromium (dos corridas por tamaño, resumen sin archivos)
+npm run profile:importer:browser
 ```
 
 - **Pruebas (`npm test`):** 34 tests unitarios nativos (`node:test`) que validan la suite completa: parsing HTML y JSON, extracción selectiva ZIP, defensas contra bombas de compresión, multipartes y álgebra relacional.
 - **Tipos (`npm run typecheck`):** Validación TypeScript sin errores (`tsc --noEmit`).
 - **Compilación (`npm run build`):** Generación limpia de bundles para producción con Vinext (Vite 8).
+- **Rendimiento (`npm run benchmark:importer`):** Escenarios sintéticos opt-in; informa tiempos y snapshots aproximados sin umbrales de CI.
+- **Escala en navegador (`npm run benchmark:importer:browser`):** Ejecución Playwright independiente para importar relaciones medianas, los tres tamaños relacionales de alta cardinalidad, un payload JSON válido de 30 MiB y el caso de límite excedido con recuperación; usa solo datos sintéticos y no forma parte de `npm run test:e2e`.
+- **Etapas de importación (`npm run benchmark:importer:stages`):** Dos repeticiones opt-in de importación mediana y al límite en Chromium, comparando ZIP DEFLATE con STORE tras verificar el método del directorio central; imprime timings instrumentados y no instrumentados, sin umbrales.
+- **Relaciones realistas de alta cardinalidad (`npm run benchmark:importer:realistic`):** Dos repeticiones opt-in de tres escalas de JSON sintético válido, comparando DEFLATE/STORE en Chromium y verificando conteos del dashboard, tamaños, límites y método ZIP. No usa padding ni forma parte de CI o `npm run test:e2e`.
+- **Experimento de optimización del importador (`npm run benchmark:importer:optimization`):** Tres repeticiones tras calentamiento, para comparar el importador actual con un parser experimental que agrega directamente a los conjuntos globales. Se ejecuta en Chromium con fixtures DEFLATE medianos, de alta cardinalidad y próximos al límite; no altera la ruta de producto ni se ejecuta en CI.
+- **Alternativa CRC32 (`npm run benchmark:importer:crc32`):** Verifica equivalencia con el algoritmo productivo y los CRC del directorio central, y compara cinco corridas por entrada JSON en tres escalas Chromium. Slicing-by-8 es solo un candidato en `tests/perf`; no modifica el importador ni forma parte de CI.
+- **Profiling de CPU (`npm run profile:importer:browser`):** Captura CDP opcional del flujo UI mediano y cercano al límite; imprime un resumen de funciones sin guardar perfiles crudos ni datos importados.
 - **Linter (`npm run lint`):** Análisis con `oxlint` (el núcleo del importador en `lib/` cuenta con 0 errores; las advertencias preexistentes se encuentran acotadas a componentes generados de UI y `node:test`, documentadas en [development.md](docs/knowledge/development.md)).
 
 ---

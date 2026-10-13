@@ -26,7 +26,7 @@ Do NOT load all repository files at once. The shared technical knowledge base is
   - [ADR-0001: Client-Side Privacy Boundary](docs/knowledge/decisions/0001-client-side-privacy-boundary.md)
   - [ADR-0002: Snapshot Observation Model](docs/knowledge/decisions/0002-snapshot-observation-model.md)
   - [ADR-0003: Optional Local Persistence](docs/knowledge/decisions/0003-optional-local-persistence.md)
-  - [ADR-0004: Incremental ZIP Processing (Target)](docs/knowledge/decisions/0004-incremental-zip-processing.md)
+  - [ADR-0004: Selective ZIP Processing](docs/knowledge/decisions/0004-incremental-zip-processing.md)
 - **Specialized Repository Skills:**
   - Import Workflow & ZIP Handling: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
   - Change & Quality Verification: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
@@ -51,7 +51,8 @@ Do NOT load all repository files at once. The shared technical knowledge base is
    - The system inspects archive structure to locate only required entries. It must never extract, buffer, or deserialize media (photos, videos, reels, stories), private direct messages, or unrelated metadata.
    - Accepting a complete official ZIP export does NOT mean extracting all contained files.
    - The total archive size of a legitimate ZIP export (e.g. >200 MB) is not, by itself, a valid reason to reject an import.
-   - Reading the full ZIP into memory before extraction is a **current implementation constraint** in `lib/importer.ts`, not the desired architectural model. Future evolution must process archives incrementally.
+   - ZIP imports use central-directory inspection and `File.slice()` range reads to extract only relevant entries; the full ZIP is not loaded into memory. Standalone relevant files are read individually with a cumulative 30 MiB limit. Relevant ZIP entries and their cumulative compressed/decompressed data are also bounded to 30 MiB.
+   - DEFLATE entries are decompressed in chunks under the output limit. JSON and HTML are still parsed per file (`JSON.parse` / `DOMParser`); this is not a fully streaming parser or sequential whole-archive streaming implementation.
    - Future data categories must be added through distinct, independent analyzers with formal architectural decisions.
 5. **Persistence is Explicit and Local:** Data lives in React state by default. Storage in IndexedDB (`followlens-local`) requires voluntary, explicit user opt-in via the import dialog checkbox.
 6. **Strict Account Scoping:** Different accounts (`account`) must never have their snapshots compared, merged, or aggregated together.
@@ -63,17 +64,17 @@ Do NOT load all repository files at once. The shared technical knowledge base is
 
 Agents must explicitly distinguish between what is currently implemented and what is planned:
 
-| Aspect | Current Implementation (`lib/importer.ts`) | Target Architecture (Fases 2–4 / ADR-0004) |
+| Aspect | Current Implementation (`lib/importer.ts`, `lib/zip.ts`) | Further Evolution |
 |---|---|---|
-| **Archive Ingestion** | In-memory buffering via `File.arrayBuffer()`. | Progressive stream/chunked inspection. |
-| **Archive Size Limit** | Arbitrary fixed threshold (`MAX_ARCHIVE = 200 MB`). | No arbitrary total archive size rejection; resource-aware handling. |
-| **Decompression API** | `fflate.unzip` callback with entry filter. | Incremental selective entry extraction. |
-| **JSON Decompression** | Memory cap of 30 MB / 1.000 files decompressed. | Dynamic bounded buffer per target JSON entry. |
-| **Parsing Strategy** | Monolithic `JSON.parse` per extracted JSON. | Evaluated in Phase 2 for scale vs. streaming parser. |
-| **Functional Scope** | Followers (`followers_*.json`) + Following (`following.json`). | Followers + Following preserved; modular analyzer pipeline prepared. |
+| **ZIP Ingestion** | EOCD and central-directory inspection followed by `File.slice()` reads of relevant entry ranges; unrelated entry data is not read. | Preserve selective reads while evaluating browser-friendly progress and cancellation. |
+| **Standalone Files** | Relevant files are read individually with `File.arrayBuffer()` and a 30 MiB cumulative limit. | Any change must retain bounded resource use. |
+| **Total ZIP Size** | No arbitrary total archive-size rejection; the central directory and relevant entry data have independent limits. | Continue resource-aware handling without a fixed container-size cap. |
+| **Decompression** | STORE is copied directly; DEFLATE is expanded in chunks with a 30 MiB per-entry and cumulative output budget. | Further reduce transient memory where justified. |
+| **Parsing Strategy** | `JSON.parse` / `DOMParser` processes each relevant file after bounded extraction. | Evaluate streaming parsers only if scale warrants their complexity. |
+| **Functional Scope** | Followers and following, in JSON or HTML, with sequential follower-part validation. | Future analyzers require independent design decisions. |
 
 > [!IMPORTANT]
-> Never state or imply that the incremental streamer or large ZIP support is already implemented until the functional code and tests have been written and validated in their authorized phase.
+> Selective ZIP range reading and chunked DEFLATE decompression are implemented. Do not describe the importer as a fully sequential streaming archive reader or a streaming JSON/HTML parser.
 
 ---
 
@@ -87,6 +88,16 @@ Derived directly from `package.json`:
 | **Development** | `npm run dev` | Start Vite/Vinext dev server with HMR. | |
 | **Build** | `npm run build` | Compile production client and SSR bundles. | `vinext build` (Vite 8.2.2). |
 | **Testing** | `npm test` | Run 34 unit tests. | `node --test lib/relationships.test.ts`. |
+| **Importer benchmark** | `npm run benchmark:importer` | Measure synthetic import stages and resource snapshots in Node.js. | Optional local benchmark; no timing thresholds. |
+| **Browser-scale benchmark** | `npm run benchmark:importer:browser` | Measure synthetic medium, high-cardinality and near-limit imports in Chromium. | Standalone opt-in run; includes limit rejection/recovery. |
+| **Browser stage comparison** | `npm run benchmark:importer:stages` | Compare DEFLATE/STORE and instrument browser import stages. | Two repetitions per synthetic scenario; opt-in, no thresholds. |
+| **Realistic browser benchmark** | `npm run benchmark:importer:realistic` | Compare high-cardinality official-schema JSON imports in Chromium. | Three scales and two repetitions; synthetic, opt-in, no thresholds. |
+| **Importer optimization experiment** | `npm run benchmark:importer:optimization` | Compare current import path with an isolated direct-Set parser prototype. | Three repetitions after warm-up at three scales; benchmark-only. |
+| **CRC32 alternative benchmark** | `npm run benchmark:importer:crc32` | Compare production CRC32 with a benchmark-only slicing-by-8 implementation. | Five repetitions per ZIP entry and scale; synthetic Chromium run, no thresholds. |
+| **Worker responsiveness experiment** | `npm run benchmark:importer:worker` | Compare main-thread imports with an isolated Worker using the production importer. | Five repetitions per variant and scale; optional Chromium diagnostic, not CI. |
+| **Dashboard render diagnostic** | `npm run benchmark:importer:render` | Profile dashboard React subtrees and a real relationship-filter interaction in Chromium. | Five repetitions per variant and scale; opt-in development-server benchmark, not CI. |
+| **Browser CPU profile** | `npm run profile:importer:browser` | Profile medium and near-limit imports with CDP. | Standalone opt-in; summary only, no raw profile files. |
+| **Browser E2E** | `npm run test:e2e` | Run importer regressions in Chromium. | Install once with `npx playwright install chromium`. |
 | **Typecheck** | `npm run typecheck` | Run strict TypeScript validation. | `tsc --noEmit`. |
 | **Formatting** | `npm run format` | Run code formatter via `oxfmt`. | |
 | **Linting** | `npm run lint` | Run linter via `oxlint`. | Pre-existing typeAware lint findings in `components/ui/*` and `node:test` (see [development.md](docs/knowledge/development.md)). |

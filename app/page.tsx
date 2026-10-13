@@ -1,5 +1,6 @@
 ﻿'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { Profiler, useEffect, useMemo, useState } from 'react';
+import type { ProfilerOnRenderCallback, ReactNode } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -98,6 +99,51 @@ const changeGroups: Group[] = [
   'lostMutuals',
   'newMutuals',
 ];
+const recordReactProfile: ProfilerOnRenderCallback = (
+  id,
+  phase,
+  actualDuration,
+  baseDuration,
+  startTime,
+  commitTime,
+) => {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return;
+  const benchmark = window.__followLensWorkerE2E;
+  if (!benchmark?.profileEnabled) return;
+  benchmark.reactProfiles.push({
+    id,
+    phase,
+    actualDuration,
+    baseDuration,
+    startTime,
+    commitTime,
+  });
+  if (
+    id === 'relationship-list' &&
+    benchmark.interactionTargetGroup !== null &&
+    benchmark.interactionStartedAt !== null &&
+    benchmark.interactionReactCommittedAt === null
+  ) {
+    const interactionStartedAt = benchmark.interactionStartedAt;
+    benchmark.interactionReactCommittedAt = commitTime;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const frameAt = performance.now();
+        if (benchmark.interactionStartedAt === interactionStartedAt)
+          benchmark.interactionSecondFrameAt = frameAt;
+      });
+    });
+  }
+};
+function profileSubtree(id: string, enabled: boolean, children: ReactNode) {
+  return enabled ? (
+    <Profiler id={id} onRender={recordReactProfile}>
+      {children}
+    </Profiler>
+  ) : (
+    children
+  );
+}
 function Picker({
   value,
   onChange,
@@ -238,6 +284,10 @@ function Trend({ snapshots }: { snapshots: Snapshot[] }) {
 export default function Home() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]),
     [savedIds, setSavedIds] = useState<string[]>([]),
+    [importAnalysis, setImportAnalysis] = useState<{
+      snapshotId: string;
+      data: Record<Group, string[]>;
+    } | null>(null),
     [ready, setReady] = useState(false),
     [demo, setDemo] = useState(false),
     [account, setAccount] = useState(''),
@@ -281,6 +331,11 @@ export default function Home() {
     : accounts.includes(account)
       ? account
       : (accounts[0] ?? '');
+  const benchmark =
+    import.meta.env.DEV && typeof window !== 'undefined'
+      ? window.__followLensWorkerE2E
+      : undefined;
+  const profileEnabled = benchmark?.profileEnabled === true;
   const history = useMemo(
     () =>
       active
@@ -291,11 +346,54 @@ export default function Home() {
   const current = history.find((s) => s.id === selected) ?? history.at(-1);
   const earlier = history.filter((s) => current && s.date < current.date);
   const previous = earlier.find((s) => s.id === baseline) ?? earlier.at(-1);
-  const data = useMemo(
-    () => (current ? analyze(current, previous) : null),
-    [current, previous],
-  );
+  const onAnalysisMeasured =
+    import.meta.env.DEV && typeof window !== 'undefined'
+      ? window.__followLensWorkerE2E?.recordAnalysisDuration
+      : undefined;
+  const data = useMemo(() => {
+    if (!current) return null;
+    if (importAnalysis?.snapshotId === current.id && !previous)
+      return importAnalysis.data;
+    return analyze(current, previous, onAnalysisMeasured);
+  }, [current, previous, importAnalysis, onAnalysisMeasured]);
   const followingSet = useMemo(() => new Set(current?.following), [current]);
+  useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return;
+    const benchmark = window.__followLensWorkerE2E;
+    if (!benchmark) return;
+    benchmark.resetDashboard = () => {
+      setSnapshots([]);
+      setSavedIds([]);
+      setImportAnalysis(null);
+      setAccount('');
+      setSelected('');
+      setBaseline('');
+      setDemo(false);
+      setView('overview');
+      setGroup('notBack');
+      setQuery('');
+      setOnlyFollowing(false);
+      setPage(0);
+      setNotice('');
+      setError('');
+      benchmark.operationStartedAt = null;
+      benchmark.dashboardPresentedAt = null;
+      benchmark.dashboardFrameAt = null;
+      benchmark.dashboardSecondFrameAt = null;
+      benchmark.lastDashboard = null;
+      benchmark.pipelineMetrics = null;
+      benchmark.profileEnabled = false;
+      benchmark.reactProfiles = [];
+      benchmark.derivedListSamples = [];
+      benchmark.importResultReceivedAt = null;
+      benchmark.stateUpdateStartedAt = null;
+      benchmark.stateUpdateEnqueuedAt = null;
+      benchmark.interactionStartedAt = null;
+      benchmark.interactionTargetGroup = null;
+      benchmark.interactionReactCommittedAt = null;
+      benchmark.interactionSecondFrameAt = null;
+    };
+  }, []);
   useEffect(() => {
     if (!previous && changeGroups.includes(group)) setGroup('notBack');
   }, [previous, group]);
@@ -303,11 +401,26 @@ export default function Home() {
     (s) => current && s.date <= current.date,
   );
   const historical = changeGroups.includes(group);
+  const derivedListStartedAt =
+    profileEnabled && benchmark && benchmark.operationStartedAt !== null
+      ? // oxlint-disable-next-line react/react-compiler
+        performance.now()
+      : null;
   const visibleNames = (data?.[group] ?? []).filter(
     (n) =>
       n.includes(query.trim().replace(/^@/, '').toLowerCase()) &&
       (!onlyFollowing || followingSet.has(n)),
   );
+  if (derivedListStartedAt !== null && benchmark) {
+    // oxlint-disable-next-line react/react-compiler
+    const derivedListEndedAt = performance.now();
+    benchmark.derivedListSamples.push({
+      at: derivedListEndedAt,
+      durationMs: derivedListEndedAt - derivedListStartedAt,
+      group,
+      count: visibleNames.length,
+    });
+  }
   const pages = Math.max(1, Math.ceil(visibleNames.length / 12)),
     safePage = Math.min(page, pages - 1),
     shown = visibleNames.slice(safePage * 12, safePage * 12 + 12);
@@ -325,7 +438,17 @@ export default function Home() {
     setPage(0);
     setDetail(null);
   }
-  async function importSnapshot(s: Snapshot, persist: boolean) {
+  async function importSnapshot(
+    s: Snapshot,
+    persist: boolean,
+    analysis?: Record<Group, string[]>,
+  ) {
+    if (
+      import.meta.env.DEV &&
+      benchmark?.profileEnabled &&
+      benchmark.operationStartedAt !== null
+    )
+      benchmark.stateUpdateStartedAt = performance.now();
     if (
       snapshots.some((old) => old.account === s.account && old.date === s.date)
     )
@@ -337,6 +460,7 @@ export default function Home() {
       setSavedIds((ids) => [...ids, s.id]);
     }
     setSnapshots((old) => [...old, s]);
+    setImportAnalysis(analysis ? { snapshotId: s.id, data: analysis } : null);
     setDemo(false);
     setAccount(s.account);
     setSelected(s.id);
@@ -349,7 +473,42 @@ export default function Home() {
         : 'Importación lista. Se conserva solo durante esta sesión.',
     );
     setError('');
+    if (
+      import.meta.env.DEV &&
+      benchmark?.profileEnabled &&
+      benchmark.operationStartedAt !== null
+    )
+      benchmark.stateUpdateEnqueuedAt = performance.now();
   }
+  useEffect(() => {
+    if (
+      !import.meta.env.DEV ||
+      typeof window === 'undefined' ||
+      !current ||
+      !data
+    )
+      return;
+    const benchmark = window.__followLensWorkerE2E;
+    if (benchmark && benchmark.operationStartedAt !== null) {
+      const operationStartedAt = benchmark.operationStartedAt;
+      benchmark.lastDashboard = { snapshot: current, data };
+      benchmark.dashboardPresentedAt = performance.now();
+      let secondFrame = 0;
+      const firstFrame = requestAnimationFrame(() => {
+        if (benchmark.operationStartedAt !== operationStartedAt) return;
+        const time = performance.now();
+        benchmark.dashboardFrameAt = time;
+        secondFrame = requestAnimationFrame(() => {
+          if (benchmark.operationStartedAt === operationStartedAt)
+            benchmark.dashboardSecondFrameAt = performance.now();
+        });
+      });
+      return () => {
+        cancelAnimationFrame(firstFrame);
+        cancelAnimationFrame(secondFrame);
+      };
+    }
+  }, [current, data]);
   async function erase() {
     if (!remove) return;
     setBusy(true);
@@ -470,8 +629,8 @@ export default function Home() {
                 </span>
                 <h2>Empezá con tus datos</h2>
                 <p>
-                  Importá tu exportación de Instagram en ZIP o JSON. Todo se
-                  analiza acá, en tu navegador.
+                  Importá tu exportación de Instagram en ZIP o archivos JSON o
+                  HTML. Todo se analiza acá, en tu navegador.
                 </p>
                 <div className="actions">
                   <button
@@ -616,345 +775,365 @@ export default function Home() {
                   className="stat-grid"
                   aria-label="Resumen de relaciones"
                 >
-                  {(
-                    [
-                      { key: 'followers', icon: Users },
-                      { key: 'following', icon: ArrowUpRight },
-                      { key: 'mutuals', icon: ArrowLeftRight },
-                    ] as const
-                  ).map(({ key, icon: Icon }) => {
-                    const delta = previous
-                      ? data![key].length - analyze(previous)[key].length
-                      : null;
-                    return (
+                  {profileSubtree(
+                    'relationship-summary',
+                    profileEnabled,
+                    <>
+                      {(
+                        [
+                          { key: 'followers', icon: Users },
+                          { key: 'following', icon: ArrowUpRight },
+                          { key: 'mutuals', icon: ArrowLeftRight },
+                        ] as const
+                      ).map(({ key, icon: Icon }) => {
+                        const delta = previous
+                          ? data![key].length - analyze(previous)[key].length
+                          : null;
+                        return (
+                          <button
+                            className="stat-card"
+                            key={key}
+                            onClick={() => filter(key)}
+                          >
+                            <div>
+                              <span>{labels[key]}</span>
+                              <Icon size={18} />
+                            </div>
+                            <strong>{count(data![key].length)}</strong>
+                            <small>
+                              {delta !== null ? (
+                                <>
+                                  <span
+                                    className={
+                                      delta >= 0 ? 'positive' : 'negative'
+                                    }
+                                  >
+                                    {delta >= 0 ? '+' : ''}
+                                    {count(delta)}
+                                  </span>{' '}
+                                  frente a la comparación
+                                </>
+                              ) : (
+                                'Tu punto de partida'
+                              )}
+                            </small>
+                          </button>
+                        );
+                      })}
                       <button
-                        className="stat-card"
-                        key={key}
-                        onClick={() => filter(key)}
+                        className="stat-card accent-stat"
+                        onClick={() => filter('notBack')}
                       >
                         <div>
-                          <span>{labels[key]}</span>
-                          <Icon size={18} />
+                          <span>Te siguen de vuelta</span>
+                          <Fingerprint size={19} />
                         </div>
-                        <strong>{count(data![key].length)}</strong>
+                        <strong>
+                          {current.following.length
+                            ? `${Math.round((data!.mutuals.length / current.following.length) * 100)}%`
+                            : '—'}
+                        </strong>
                         <small>
-                          {delta !== null ? (
-                            <>
-                              <span
-                                className={delta >= 0 ? 'positive' : 'negative'}
-                              >
-                                {delta >= 0 ? '+' : ''}
-                                {count(delta)}
-                              </span>{' '}
-                              frente a la comparación
-                            </>
-                          ) : (
-                            'Tu punto de partida'
-                          )}
+                          {count(data!.mutuals.length)} de{' '}
+                          {count(current.following.length)} cuentas que seguís
                         </small>
                       </button>
-                    );
-                  })}
-                  <button
-                    className="stat-card accent-stat"
-                    onClick={() => filter('notBack')}
-                  >
-                    <div>
-                      <span>Te siguen de vuelta</span>
-                      <Fingerprint size={19} />
-                    </div>
-                    <strong>
-                      {current.following.length
-                        ? `${Math.round((data!.mutuals.length / current.following.length) * 100)}%`
-                        : '—'}
-                    </strong>
-                    <small>
-                      {count(data!.mutuals.length)} de{' '}
-                      {count(current.following.length)} cuentas que seguís
-                    </small>
-                  </button>
+                    </>,
+                  )}
                 </section>
                 <section className="insight-grid">
-                  <div className="insights">
-                    <div className="section-heading">
-                      <h3>
-                        <Sparkles size={17} /> Vale la pena mirar
-                      </h3>
-                      <span className="period">
-                        {previous
-                          ? `${shortDate(previous.date)} — ${shortDate(current.date)}`
-                          : 'Primera importación'}
-                      </span>
-                    </div>
-                    {previous ? (
-                      <>
-                        <button
-                          className="insight-row"
-                          onClick={() => filter('lost')}
-                        >
-                          <span className="insight-icon pink">
-                            <ArrowDownLeft size={20} />
+                  {profileSubtree(
+                    'relationship-insights',
+                    profileEnabled,
+                    <>
+                      <div className="insights">
+                        <div className="section-heading">
+                          <h3>
+                            <Sparkles size={17} /> Vale la pena mirar
+                          </h3>
+                          <span className="period">
+                            {previous
+                              ? `${shortDate(previous.date)} — ${shortDate(current.date)}`
+                              : 'Primera importación'}
                           </span>
-                          <span>
-                            <strong>
-                              {count(data!.lost.length)} seguidores ya no
-                              aparecen
-                            </strong>
-                            <small>
-                              A {count(stillFollow.length)} de ellos todavía los
-                              seguís.
-                            </small>
-                          </span>
-                          <ChevronRight size={18} />
-                        </button>
-                        <button
-                          className="insight-row"
-                          onClick={() => filter('new')}
-                        >
-                          <span className="insight-icon green">
-                            <ArrowUpRight size={20} />
-                          </span>
-                          <span>
-                            <strong>
-                              {count(data!.new.length)} personas nuevas te
-                              siguen
-                            </strong>
-                            <small>
-                              No seguís de vuelta a{' '}
-                              {count(
-                                data!.new.filter(
-                                  (n) => !current.following.includes(n),
-                                ).length,
-                              )}{' '}
-                              de ellas.
-                            </small>
-                          </span>
-                          <ChevronRight size={18} />
-                        </button>
-                        <button
-                          className="insight-row"
-                          onClick={() => filter('lostMutuals')}
-                        >
-                          <span className="insight-icon violet">
-                            <ArrowLeftRight size={20} />
-                          </span>
-                          <span>
-                            <strong>
-                              {count(data!.lostMutuals.length)} relaciones
-                              dejaron de ser mutuas
-                            </strong>
-                            <small>Revisá cómo cambió cada relación.</small>
-                          </span>
-                          <ChevronRight size={18} />
-                        </button>
-                      </>
-                    ) : (
-                      <div className="first-import">
-                        <span className="insight-icon violet">
-                          <History />
-                        </span>
-                        <h3>Este es tu punto de partida</h3>
-                        <p>
-                          Importá otra fecha de esta cuenta para descubrir
-                          seguidores nuevos y perdidos.
-                        </p>
-                        <button
-                          className="text-button"
-                          onClick={() => setImportOpen(true)}
-                        >
-                          Comparar otra importación <ArrowRight size={16} />
-                        </button>
+                        </div>
+                        {previous ? (
+                          <>
+                            <button
+                              className="insight-row"
+                              onClick={() => filter('lost')}
+                            >
+                              <span className="insight-icon pink">
+                                <ArrowDownLeft size={20} />
+                              </span>
+                              <span>
+                                <strong>
+                                  {count(data!.lost.length)} seguidores ya no
+                                  aparecen
+                                </strong>
+                                <small>
+                                  A {count(stillFollow.length)} de ellos todavía
+                                  los seguís.
+                                </small>
+                              </span>
+                              <ChevronRight size={18} />
+                            </button>
+                            <button
+                              className="insight-row"
+                              onClick={() => filter('new')}
+                            >
+                              <span className="insight-icon green">
+                                <ArrowUpRight size={20} />
+                              </span>
+                              <span>
+                                <strong>
+                                  {count(data!.new.length)} personas nuevas te
+                                  siguen
+                                </strong>
+                                <small>
+                                  No seguís de vuelta a{' '}
+                                  {count(
+                                    data!.new.filter(
+                                      (n) => !current.following.includes(n),
+                                    ).length,
+                                  )}{' '}
+                                  de ellas.
+                                </small>
+                              </span>
+                              <ChevronRight size={18} />
+                            </button>
+                            <button
+                              className="insight-row"
+                              onClick={() => filter('lostMutuals')}
+                            >
+                              <span className="insight-icon violet">
+                                <ArrowLeftRight size={20} />
+                              </span>
+                              <span>
+                                <strong>
+                                  {count(data!.lostMutuals.length)} relaciones
+                                  dejaron de ser mutuas
+                                </strong>
+                                <small>Revisá cómo cambió cada relación.</small>
+                              </span>
+                              <ChevronRight size={18} />
+                            </button>
+                          </>
+                        ) : (
+                          <div className="first-import">
+                            <span className="insight-icon violet">
+                              <History />
+                            </span>
+                            <h3>Este es tu punto de partida</h3>
+                            <p>
+                              Importá otra fecha de esta cuenta para descubrir
+                              seguidores nuevos y perdidos.
+                            </p>
+                            <button
+                              className="text-button"
+                              onClick={() => setImportOpen(true)}
+                            >
+                              Comparar otra importación <ArrowRight size={16} />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <Trend snapshots={relevantHistory} />
+                      <Trend snapshots={relevantHistory} />
+                    </>,
+                  )}
                 </section>
                 <section
                   className="relationships"
                   aria-label="Listado de cuentas"
                 >
-                  <div className="list-heading">
-                    <div>
-                      <h2>Las personas detrás de los números</h2>
-                      <p className="subtle">
-                        Elegí una relación y explorá cada cuenta.
-                      </p>
-                    </div>
-                    <button
-                      className="btn"
-                      disabled={
-                        !visibleNames.length || (historical && !previous)
-                      }
-                      onClick={downloadCSV}
-                    >
-                      <Download size={16} /> Exportar CSV
-                    </button>
-                  </div>
-                  <div className="list-controls">
-                    <Picker
-                      label="Filtrar relaciones"
-                      value={group}
-                      onChange={(v) => filter(v as Group)}
-                      items={[
-                        ...currentGroups,
-                        ...(previous ? changeGroups : []),
-                      ].map((g) => ({
-                        value: g,
-                        label: `${labels[g]} · ${count(data![g].length)}`,
-                      }))}
-                    />
-                    <label className="search">
-                      <Search size={17} />
-                      <input
-                        aria-label="Buscar por usuario"
-                        placeholder="Buscar una cuenta…"
-                        value={query}
-                        onChange={(e) => {
-                          setQuery(e.target.value);
-                          setPage(0);
-                        }}
-                      />
-                      {query && (
+                  {profileSubtree(
+                    'relationship-list',
+                    profileEnabled,
+                    <>
+                      <div className="list-heading">
+                        <div>
+                          <h2>Las personas detrás de los números</h2>
+                          <p className="subtle">
+                            Elegí una relación y explorá cada cuenta.
+                          </p>
+                        </div>
                         <button
-                          aria-label="Limpiar búsqueda"
-                          onClick={() => setQuery('')}
+                          className="btn"
+                          disabled={
+                            !visibleNames.length || (historical && !previous)
+                          }
+                          onClick={downloadCSV}
                         >
-                          <X size={14} />
+                          <Download size={16} /> Exportar CSV
                         </button>
-                      )}
-                    </label>
-                    {group === 'lost' && (
-                      <label className="check-row compact">
-                        <Checkbox
-                          checked={onlyFollowing}
-                          onCheckedChange={(v) => {
-                            setOnlyFollowing(v === true);
-                            setPage(0);
-                          }}
+                      </div>
+                      <div className="list-controls">
+                        <Picker
+                          label="Filtrar relaciones"
+                          value={group}
+                          onChange={(v) => filter(v as Group)}
+                          items={[
+                            ...currentGroups,
+                            ...(previous ? changeGroups : []),
+                          ].map((g) => ({
+                            value: g,
+                            label: `${labels[g]} · ${count(data![g].length)}`,
+                          }))}
                         />
-                        <span>Todavía los sigo</span>
-                      </label>
-                    )}
-                  </div>
-                  <div className="group-description">
-                    {group === 'notBack'
-                      ? 'Cuentas que seguís y que no aparecen entre tus seguidores.'
-                      : group === 'fans'
-                        ? 'Te siguen, pero no aparecen en tu lista de seguidos.'
-                        : historical
-                          ? 'Cambios observados entre las dos fechas seleccionadas.'
-                          : 'Relaciones presentes en la importación seleccionada.'}
-                  </div>
-                  {historical && !previous ? (
-                    <Empty>
-                      <History />
-                      <EmptyTitle>Necesitás dos importaciones</EmptyTitle>
-                      <EmptyDescription>
-                        Seleccioná una fecha con una importación anterior para
-                        ver estos cambios.
-                      </EmptyDescription>
-                    </Empty>
-                  ) : shown.length ? (
-                    <Table className="people-table">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Cuenta</TableHead>
-                          <TableHead>Relación en esta fecha</TableHead>
-                          <TableHead>Detectada en</TableHead>
-                          <TableHead>
-                            <span className="sr-only">Detalle</span>
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {shown.map((name) => (
-                          <TableRow key={name}>
-                            <TableCell>
-                              <button
-                                className="person"
-                                onClick={() => setDetail(name)}
-                              >
-                                <Avatar name={name} />
-                                <strong>@{name}</strong>
-                              </button>
-                            </TableCell>
-                            <TableCell>
-                              <span
-                                className={`status-pill ${relationship(current, name) === 'Mutuos' ? 'green' : current.following.includes(name) ? 'violet' : ''}`}
-                              >
-                                {current.following.includes(name) && (
-                                  <Check size={12} />
-                                )}{' '}
-                                {relationship(current, name)}
-                              </span>
-                            </TableCell>
-                            <TableCell className="muted-cell">
-                              {historical
-                                ? fmt(current.date)
-                                : fmt(
-                                    relevantHistory.find(
-                                      (s) =>
-                                        s.followers.includes(name) ||
-                                        s.following.includes(name),
-                                    )?.date ?? current.date,
-                                  )}
-                            </TableCell>
-                            <TableCell>
-                              <button
-                                className="icon-button"
-                                aria-label={`Ver historial de ${name}`}
-                                onClick={() => setDetail(name)}
-                              >
-                                <ChevronRight size={18} />
-                              </button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <Empty>
-                      <Search />
-                      <EmptyTitle>
-                        {query
-                          ? 'No encontramos esa cuenta'
-                          : 'No hay cuentas en este grupo'}
-                      </EmptyTitle>
-                      <EmptyDescription>
-                        {query
-                          ? 'Probá con otro usuario o cambiá el filtro.'
-                          : 'Este resultado corresponde a las fechas seleccionadas.'}
-                      </EmptyDescription>
-                    </Empty>
+                        <label className="search">
+                          <Search size={17} />
+                          <input
+                            aria-label="Buscar por usuario"
+                            placeholder="Buscar una cuenta…"
+                            value={query}
+                            onChange={(e) => {
+                              setQuery(e.target.value);
+                              setPage(0);
+                            }}
+                          />
+                          {query && (
+                            <button
+                              aria-label="Limpiar búsqueda"
+                              onClick={() => setQuery('')}
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </label>
+                        {group === 'lost' && (
+                          <label className="check-row compact">
+                            <Checkbox
+                              checked={onlyFollowing}
+                              onCheckedChange={(v) => {
+                                setOnlyFollowing(v === true);
+                                setPage(0);
+                              }}
+                            />
+                            <span>Todavía los sigo</span>
+                          </label>
+                        )}
+                      </div>
+                      <div className="group-description">
+                        {group === 'notBack'
+                          ? 'Cuentas que seguís y que no aparecen entre tus seguidores.'
+                          : group === 'fans'
+                            ? 'Te siguen, pero no aparecen en tu lista de seguidos.'
+                            : historical
+                              ? 'Cambios observados entre las dos fechas seleccionadas.'
+                              : 'Relaciones presentes en la importación seleccionada.'}
+                      </div>
+                      {historical && !previous ? (
+                        <Empty>
+                          <History />
+                          <EmptyTitle>Necesitás dos importaciones</EmptyTitle>
+                          <EmptyDescription>
+                            Seleccioná una fecha con una importación anterior
+                            para ver estos cambios.
+                          </EmptyDescription>
+                        </Empty>
+                      ) : shown.length ? (
+                        <Table className="people-table">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Cuenta</TableHead>
+                              <TableHead>Relación en esta fecha</TableHead>
+                              <TableHead>Detectada en</TableHead>
+                              <TableHead>
+                                <span className="sr-only">Detalle</span>
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {shown.map((name) => (
+                              <TableRow key={name}>
+                                <TableCell>
+                                  <button
+                                    className="person"
+                                    onClick={() => setDetail(name)}
+                                  >
+                                    <Avatar name={name} />
+                                    <strong>@{name}</strong>
+                                  </button>
+                                </TableCell>
+                                <TableCell>
+                                  <span
+                                    className={`status-pill ${relationship(current, name) === 'Mutuos' ? 'green' : current.following.includes(name) ? 'violet' : ''}`}
+                                  >
+                                    {current.following.includes(name) && (
+                                      <Check size={12} />
+                                    )}{' '}
+                                    {relationship(current, name)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="muted-cell">
+                                  {historical
+                                    ? fmt(current.date)
+                                    : fmt(
+                                        relevantHistory.find(
+                                          (s) =>
+                                            s.followers.includes(name) ||
+                                            s.following.includes(name),
+                                        )?.date ?? current.date,
+                                      )}
+                                </TableCell>
+                                <TableCell>
+                                  <button
+                                    className="icon-button"
+                                    aria-label={`Ver historial de ${name}`}
+                                    onClick={() => setDetail(name)}
+                                  >
+                                    <ChevronRight size={18} />
+                                  </button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      ) : (
+                        <Empty>
+                          <Search />
+                          <EmptyTitle>
+                            {query
+                              ? 'No encontramos esa cuenta'
+                              : 'No hay cuentas en este grupo'}
+                          </EmptyTitle>
+                          <EmptyDescription>
+                            {query
+                              ? 'Probá con otro usuario o cambiá el filtro.'
+                              : 'Este resultado corresponde a las fechas seleccionadas.'}
+                          </EmptyDescription>
+                        </Empty>
+                      )}
+                      <div className="table-footer">
+                        <span>
+                          {visibleNames.length
+                            ? `${safePage * 12 + 1}–${Math.min((safePage + 1) * 12, visibleNames.length)} de ${count(visibleNames.length)} cuentas`
+                            : '0 cuentas'}
+                        </span>
+                        <nav aria-label="Paginación de cuentas">
+                          <button
+                            className="icon-button"
+                            aria-label="Página anterior"
+                            disabled={safePage === 0}
+                            onClick={() => setPage(safePage - 1)}
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
+                          <span>
+                            {safePage + 1} / {pages}
+                          </span>
+                          <button
+                            className="icon-button"
+                            aria-label="Página siguiente"
+                            disabled={safePage >= pages - 1}
+                            onClick={() => setPage(safePage + 1)}
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                        </nav>
+                      </div>
+                    </>,
                   )}
-                  <div className="table-footer">
-                    <span>
-                      {visibleNames.length
-                        ? `${safePage * 12 + 1}–${Math.min((safePage + 1) * 12, visibleNames.length)} de ${count(visibleNames.length)} cuentas`
-                        : '0 cuentas'}
-                    </span>
-                    <nav aria-label="Paginación de cuentas">
-                      <button
-                        className="icon-button"
-                        aria-label="Página anterior"
-                        disabled={safePage === 0}
-                        onClick={() => setPage(safePage - 1)}
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <span>
-                        {safePage + 1} / {pages}
-                      </span>
-                      <button
-                        className="icon-button"
-                        aria-label="Página siguiente"
-                        disabled={safePage >= pages - 1}
-                        onClick={() => setPage(safePage + 1)}
-                      >
-                        <ChevronRight size={18} />
-                      </button>
-                    </nav>
-                  </div>
                 </section>
                 <p className="data-note">
                   <ShieldCheck size={15} /> Los cambios se detectan entre
@@ -1049,6 +1228,11 @@ export default function Home() {
           onOpenChange={setImportOpen}
           onImport={importSnapshot}
           account={demo ? '' : actualAccount}
+          processFiles={
+            import.meta.env.DEV && typeof window !== 'undefined'
+              ? window.__followLensWorkerE2E?.processFiles
+              : undefined
+          }
         />
       )}
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
@@ -1068,15 +1252,18 @@ export default function Home() {
             <li>
               <strong>Elegí seguidores y seguidos</strong>
               <p>
-                Seleccioná formato JSON y período Todo el tiempo. Incluí todas
-                las partes de seguidores.
+                Elegí formato JSON o HTML y período Todo el tiempo. Incluí todas
+                las partes de seguidores y usá el mismo formato para seguidores
+                y seguidos.
               </p>
             </li>
             <li>
-              <strong>Importá el ZIP o los JSON</strong>
+              <strong>Importá el ZIP o los archivos individuales</strong>
               <p>
-                Indicá la cuenta y la fecha a la que corresponden los datos.
-                Para ver cambios, importá dos fechas de la misma cuenta.
+                El ZIP puede contener los datos en JSON o HTML. También podés
+                seleccionar archivos JSON o HTML individuales, sin mezclar
+                formatos. Indicá la cuenta y la fecha a la que corresponden los
+                datos. Para ver cambios, importá dos fechas de la misma cuenta.
               </p>
             </li>
           </ol>

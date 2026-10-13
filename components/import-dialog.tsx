@@ -16,18 +16,46 @@ import {
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { importFiles } from '@/lib/importer';
-import { normalize, type Snapshot } from '@/lib/relationships';
+import { normalize, type Group, type Snapshot } from '@/lib/relationships';
+
+export type ImportPipelineResult = {
+  imported: Awaited<ReturnType<typeof importFiles>>;
+  analysis?: Record<Group, string[]>;
+  metrics: {
+    mode: 'main-thread' | 'worker-warm' | 'worker-cold';
+    importMs: number;
+    analysisMs: number | null;
+    workerReadyMs: number | null;
+    roundTripMs: number | null;
+    postMessageCallMs: number | null;
+  };
+};
+
+export type ImportPipeline = (
+  files: File[],
+  snapshot: Pick<Snapshot, 'id' | 'account' | 'date' | 'importedAt'>,
+) => Promise<ImportPipelineResult>;
+
+type ProcessedImport = Pick<ImportPipelineResult, 'imported' | 'analysis'> & {
+  metrics?: ImportPipelineResult['metrics'];
+};
 
 export function ImportDialog({
   open,
   onOpenChange,
   onImport,
   account,
+  processFiles,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onImport: (s: Snapshot, persist: boolean) => Promise<void>;
+  onImport: (
+    s: Snapshot,
+    persist: boolean,
+    analysis?: Record<Group, string[]>,
+  ) => Promise<void>;
   account: string;
+  processFiles?: ImportPipeline;
 }) {
   const [files, setFiles] = useState<File[]>([]),
     [handle, setHandle] = useState(account),
@@ -35,15 +63,19 @@ export function ImportDialog({
     [persist, setPersist] = useState(false),
     [complete, setComplete] = useState(false),
     [busy, setBusy] = useState(false),
+    [processing, setProcessing] = useState(''),
     [error, setError] = useState(''),
     [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const submitting = useRef(false);
   const choose = (items: File[]) => {
     setFiles(items);
     setError('');
+    setProcessing('');
   };
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting.current) return;
     setError('');
     const normalized = normalize(handle);
     if (!normalized) {
@@ -62,19 +94,58 @@ export function ImportDialog({
       setError('Confirmá que incluís todos los seguidores y seguidos.');
       return;
     }
+    submitting.current = true;
     setBusy(true);
+    setProcessing('Leyendo y validando los archivos en este dispositivo…');
     try {
-      const result = await importFiles(files);
+      const snapshot = {
+        id: crypto.randomUUID(),
+        account: normalized,
+        date,
+        importedAt: new Date().toISOString(),
+      };
+      const benchmark =
+        import.meta.env.DEV && typeof window !== 'undefined'
+          ? window.__followLensWorkerE2E
+          : undefined;
+      if (benchmark) {
+        benchmark.operationStartedAt = performance.now();
+        benchmark.dashboardPresentedAt = null;
+        benchmark.analysisMs = null;
+        benchmark.lastDashboard = null;
+      }
+      let processed: ProcessedImport;
+      if (import.meta.env.DEV && processFiles) {
+        processed = await processFiles(files, snapshot);
+      } else {
+        const imported = await importFiles(files);
+        processed = { imported };
+      }
+      if (
+        import.meta.env.DEV &&
+        typeof window !== 'undefined' &&
+        window.__followLensWorkerE2E?.profileEnabled
+      )
+        window.__followLensWorkerE2E.importResultReceivedAt = performance.now();
+      if (benchmark) {
+        if (!processed.metrics)
+          throw new Error('Benchmark processing metrics are unavailable.');
+        benchmark.pipelineMetrics = processed.metrics;
+        benchmark.analysisMs = processed.metrics.analysisMs;
+      }
+      setProcessing(
+        persist
+          ? 'Guardando la importación y actualizando resultados…'
+          : 'Actualizando resultados…',
+      );
       await onImport(
         {
-          id: crypto.randomUUID(),
-          account: normalized,
-          date,
-          importedAt: new Date().toISOString(),
-          followers: result.followers,
-          following: result.following,
+          ...snapshot,
+          followers: processed.imported.followers,
+          following: processed.imported.following,
         },
         persist,
+        processed.analysis,
       );
       onOpenChange(false);
     } catch (err) {
@@ -83,7 +154,9 @@ export function ImportDialog({
           ? err.message
           : 'No se pudo importar. Intentá otra vez.',
       );
+      setProcessing('');
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -125,12 +198,12 @@ export function ImportDialog({
             <strong>
               {files.length
                 ? `${files.length} archivo${files.length === 1 ? '' : 's'} seleccionado${files.length === 1 ? '' : 's'}`
-                : 'Arrastrá tu ZIP, tus JSON o tus HTML'}
+                : 'Arrastrá un ZIP o archivos JSON/HTML'}
             </strong>
             <p>
               {files.length
                 ? files.map((f) => f.name).join(', ')
-                : 'Exportación ZIP completa (JSON o HTML de seguidores y seguidos) · Archivos individuales hasta 30 MB'}
+                : 'ZIP o archivos individuales JSON/HTML del mismo formato, con seguidores y seguidos · Hasta 30 MiB en total para archivos individuales'}
             </p>
             <button
               type="button"
@@ -203,6 +276,11 @@ export function ImportDialog({
             <p className="error" role="alert">
               {error}
             </p>
+          )}
+          {processing && (
+            <output className="processing-note" aria-live="polite">
+              {processing}
+            </output>
           )}
           <button className="btn primary full" disabled={busy || !files.length}>
             {busy ? (

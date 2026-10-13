@@ -28,4 +28,4 @@ Las aplicaciones tradicionales de análisis de Instagram suelen requerir que el 
 
 ## Consecuencias
 - **Positivas:** Privacidad garantizada y verificable; sin costos de infraestructura de servidores o bases de datos relacionales; inmunidad frente a filtraciones de datos en servidor; cumplimiento normativo inherente.
-- **Negativas:** La capacidad de procesamiento y memoria está limitada por los recursos del dispositivo del usuario (mitigado mediante límites estrictos de 200 MB por archivo y 30 MB / 1.000 JSONs descompresos).
+- **Negativas:** La capacidad de procesamiento y memoria está limitada por los recursos del dispositivo del usuario (mitigado mediante un presupuesto de 16 MiB para el Directorio Central, un máximo de 1.000 entradas relacionales, límites de 30 MiB por entrada y acumulados para datos ZIP relevantes, y 30 MiB acumulados para archivos sueltos; no existe un límite fijo al tamaño total del ZIP).

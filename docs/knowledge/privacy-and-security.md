@@ -46,22 +46,20 @@ FollowLens implementa **filtrado selectivo estricto**:
 
 ## 3. Gestión de Recursos y Protección DoS: Estado Actual vs. Objetivo
 
-### Límites en el Código Actual (`lib/importer.ts`)
-Para evitar bloqueos o consumos de memoria incontrolados, el código actual aplica umbrales rígidos:
-- **Límite total de archivo:** 200 MB combinados (`MAX_ARCHIVE`).
-- **Límite descompreso acumulado:** 30 MB / 1.000 archivos JSON (`MAX_JSON`).
-- **Un solo ZIP por importación:** Bloquea múltiples archivos ZIP simultáneos para evitar mezcla accidental de snapshots.
+### Límites en el Código Actual (`lib/importer.ts` y `lib/zip.ts`)
+Para evitar bloqueos o consumos de memoria incontrolados, el código aplica límites al contenido inspeccionado y procesado:
+- **Tamaño total del ZIP:** No hay un límite fijo de tamaño para el archivo contenedor. El EOCD y el Directorio Central se leen por rangos; el Directorio Central tiene un presupuesto máximo de 16 MiB.
+- **Entradas relacionales ZIP:** Se procesan hasta 1.000 entradas relevantes; cada entrada y el total de datos comprimidos y descomprimidos relevantes están limitados a 30 MiB.
+- **Archivos individuales:** Los archivos JSON/HTML seleccionados por separado tienen un límite acumulado de 30 MiB.
+- **Lectura selectiva:** Los bytes de archivos no relacionales (medios, mensajes y otros datos) no se leen desde el ZIP ni se descomprimen.
+- **Descompresión:** DEFLATE se procesa en fragmentos con límite de salida; JSON y HTML se analizan por archivo (`JSON.parse` / `DOMParser`), no mediante parsers de documentos en streaming.
+- **Un solo ZIP por importación:** Se rechaza la selección simultánea de varios ZIP para evitar mezclar exportaciones.
 
-*Diagnóstico de seguridad:* Si bien el límite de 200 MB previene la carga de archivos masivos, resulta contraproducente para exportaciones legítimas que contienen multimedia y pesan más de 200 MB (por ejemplo, 232 MB), aun cuando sus JSONs representen menos de 1 MB.
-
-### Criterio Objetivo (ADR-0004)
-En la arquitectura objetivo:
-- **No se rechazará un archivo legítimo por el mero hecho de superar los 200 MB.**
-- Las defensas se focalizan en el contenido real procesado:
-  1. **Protección contra Zip Bombs:** Límites dinámicos sobre el tamaño descompreso admitido por cada archivo JSON individual relevante.
-  2. **Consumo de memoria acotado:** Descompresión y lectura incremental por bloques, evitando cargar todo el ZIP en un único `ArrayBuffer`.
-  3. **Control de fallos de memoria:** Si el navegador o el dispositivo móvil no dispone de suficiente memoria para completar el análisis, la aplicación debe capturar el error y comunicarlo claramente sin congelar la interfaz ni dejar la pestaña en un estado irrecuperable.
-- **Sin falsas promesas:** No se promete capacidad infinita de procesamiento. Todo procesamiento en cliente está sujeto a los límites de memoria física del dispositivo y a los topes de asignación de memoria del navegador.
+### Evolución y límites del procesamiento local (ADR-0004)
+- No se rechaza un ZIP por el mero tamaño total del archivo; los topes se aplican al Directorio Central y a las entradas relacionales procesadas.
+- La lectura selectiva por rangos y la descompresión acotada reducen lecturas y buffers innecesarios, pero no implican consumo constante de memoria: el contenido relevante y los objetos creados por `JSON.parse` o `DOMParser` usan memoria local.
+- Si el navegador o el dispositivo móvil no dispone de recursos suficientes para completar el análisis, la aplicación debe comunicar el fallo sin dejar la interfaz en un estado irrecuperable.
+- **Sin falsas promesas:** Todo procesamiento en cliente está sujeto a los límites de memoria física del dispositivo y a los topes de asignación del navegador.
 
 ---
 
