@@ -1,12 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { strToU8, zipSync } from 'fflate';
 
-const appUrl = 'http://localhost:4173';
+const appUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:4173';
 const appAddress = new URL(appUrl);
 const importDate = '2020-01-02';
 const jsonFollowers = ['ana', 'mutua', 'fan'];
 const jsonFollowing = ['mutua', 'no_devuelve'];
-const htmlFollowers = ['html_ana', 'html_mutua'];
+const htmlFollowers = ['html_ana', 'html_mutua', 'cuenta.ejemplo'];
 const htmlFollowing = ['html_mutua', 'html_no_devuelve'];
 
 type BrowserSignals = {
@@ -94,6 +94,9 @@ function htmlZip(followers: string[], following: string[]): Buffer {
     'connections/followers_and_following/following.html': strToU8(
       htmlFollowingFile(following),
     ),
+    'your_instagram_activity/threads/following.html': strToU8(
+      htmlFollowingFile(['threads_only']),
+    ),
     'start_here.html': strToU8('<!doctype html><html><body></body></html>'),
     'media/synthetic.jpg': new Uint8Array([4, 5, 6, 7]),
   });
@@ -179,6 +182,13 @@ async function assertDashboardResults(
     for (const name of group.names)
       await expect(list.getByText(`@${name}`, { exact: true })).toBeVisible();
   }
+  await summary
+    .getByRole('button')
+    .filter({ hasText: 'Te siguen de vuelta' })
+    .click();
+  await expect(list.getByRole('row')).toHaveCount(expected.mutuals.length + 1);
+  for (const name of expected.mutuals)
+    await expect(list.getByText(`@${name}`, { exact: true })).toBeVisible();
 }
 
 function successNotice(page: Page) {

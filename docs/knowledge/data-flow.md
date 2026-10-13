@@ -9,7 +9,7 @@ tags:
   - json
   - zip
   - incremental-pipeline
-timestamp: '2026-10-11T02:00:00-03:00'
+timestamp: '2026-10-13T16:58:20-03:00'
 lifecycle: stable
 ---
 
@@ -178,14 +178,14 @@ Común en `following.json`:
 ### Formato HTML Oficial (DOMParser pasivo)
 
 Común en exportaciones HTML de Instagram (`followers_*.html`, `following.html`):
-- Los registros se extraen de bloques de exportación `._a6-p` / `.uiBoxWhite` o enlaces canónicos `<a href="https://www.instagram.com/[_u/]{usuario}">`.
+- Si hay bloques `._a6-p`, se priorizan sobre envoltorios `.uiBoxWhite`; se inspeccionan todos los enlaces de perfil válidos dentro de cada registro para no perder usuarios anidados.
+- Los `href` de JSON y HTML usan el mismo validador: acepta perfiles directos (`/{usuario}`) y slugs de exportación (`/_u/{usuario}`), y rechaza hostnames ajenos, rutas de contenido y rutas reservadas.
 - En listas de seguidos, se admite la extracción desde encabezados de registro (`<h2>`) si el enlace no provee directamente el usuario.
 - Decodificación automática de entidades HTML (`&commat;`, `&amp;`) mediante `textContent`.
-- Filtrado riguroso que descarta rutas de contenido (`/p/`, `/reel/`, `/stories/`, `/explore/`), enlaces institucionales/legales (`/about/`, `/legal/terms/`, `/privacy/`) y enlaces externos.
 
 ### Cuentas sin `value` explícito
 
-En algunas versiones JSON, `value` está vacío pero el nombre figura en `title` o dentro de la URL `href` (`instagram.com/_u/{usuario}`). El parser extrae y normaliza el identificador de forma segura en cualquiera de estas variantes.
+En algunas versiones JSON, `value` está vacío pero el nombre figura en `title` o dentro de una URL de perfil válida en `href` (`instagram.com/_u/{usuario}`). Un `href` que apunta a una publicación, ruta reservada o hostname ajeno no se convierte en nombre de usuario.
 
 ---
 

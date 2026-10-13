@@ -36,6 +36,68 @@ export function normalize(value: unknown): string | null {
   const name = value.trim().replace(/^@/, '').toLowerCase();
   return /^[a-z0-9._]{1,30}$/.test(name) ? name : null;
 }
+
+const RESERVED_INSTAGRAM_PATHS = new Set([
+  'p',
+  'reel',
+  'reels',
+  'stories',
+  'story',
+  'tv',
+  'share',
+  'create',
+  'explore',
+  'tags',
+  'locations',
+  'about',
+  'legal',
+  'terms',
+  'privacy',
+  'help',
+  'support',
+  'press',
+  'developer',
+  'api',
+  'directory',
+  'business',
+  'accounts',
+  'direct',
+  'emails',
+  'settings',
+  'challenge',
+  'consent',
+  'your_activity',
+  'graphql',
+  '_u',
+]);
+
+export function extractInstagramUsernameFromUrl(href: string): string | null {
+  if (typeof href !== 'string' || !href.trim()) return null;
+  try {
+    const url = new URL(href, 'https://www.instagram.com');
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname !== 'www.instagram.com' && hostname !== 'instagram.com')
+      return null;
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (!parts.length) return null;
+    const isExportSlug = parts[0].toLowerCase() === '_u';
+    if (
+      (isExportSlug && parts.length !== 2) ||
+      (!isExportSlug && parts.length !== 1)
+    )
+      return null;
+
+    const candidate = parts[isExportSlug ? 1 : 0];
+    if (!candidate || RESERVED_INSTAGRAM_PATHS.has(candidate.toLowerCase()))
+      return null;
+    return normalize(candidate);
+  } catch {
+    return null;
+  }
+}
+
 export type FileFormat = 'json' | 'html';
 export type FileKind = 'followers' | 'following';
 
@@ -138,15 +200,8 @@ export function parseRelationships(
       : [];
     const first = strings[0];
     let name = normalize(first?.value) ?? normalize(row.title);
-    if (!name && typeof first?.href === 'string') {
-      try {
-        const url = new URL(first.href);
-        if (['www.instagram.com', 'instagram.com'].includes(url.hostname)) {
-          const parts = url.pathname.split('/').filter(Boolean);
-          name = normalize(parts[0] === '_u' ? parts[1] : parts[0]);
-        }
-      } catch {}
-    }
+    if (!name && typeof first?.href === 'string')
+      name = extractInstagramUsernameFromUrl(first.href);
     if (!name)
       throw new Error(
         'No se pudo leer una cuenta. No guardamos datos parciales para evitar comparaciones incorrectas.',

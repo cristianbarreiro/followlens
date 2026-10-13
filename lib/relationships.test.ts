@@ -77,6 +77,38 @@ test('parses flat followers, wrapped following, title fallback and removes dupli
     ['caro'],
   );
 });
+void test(
+  'rejects non-profile Instagram URLs when falling back to a JSON href',
+  () => {
+    assert.throws(
+      () =>
+        parseRelationships(
+          [
+            {
+              string_list_data: [
+                { href: 'https://www.instagram.com/p/synthetic-post' },
+              ],
+            },
+          ],
+          'followers',
+        ),
+      /No se pudo leer una cuenta/i,
+    );
+    assert.deepEqual(
+      parseRelationships(
+        [
+          {
+            string_list_data: [
+              { href: 'https://www.instagram.com/_u/Cuenta.Ejemplo/' },
+            ],
+          },
+        ],
+        'followers',
+      ),
+      ['cuenta.ejemplo'],
+    );
+  },
+);
 test('rejects unsupported and partial records but accepts a genuine empty list', () => {
   assert.throws(() => parseRelationships({}, 'followers'));
   assert.throws(() => parseRelationships([record('ana'), {}], 'followers'));
@@ -1089,12 +1121,37 @@ test('extraccion HTML desde rutas /_u/, entidades, encabezados y descarte de enl
   const html = `<!DOCTYPE html><html><head><title>Seguidos</title></head><body><main>
     <div class="pam uiBoxWhite"><h2 class="_2pim">user_from_h2</h2><div class="_a6-p"><div><div><a href="https://www.instagram.com/_u/slug_user">Display Name</a></div><div>Oct 8, 2026</div></div></div></div>
     <div class="pam uiBoxWhite"><div class="_a6-p"><div><div><a href="https://www.instagram.com/entity_user">&commat;entity_user</a></div><div>Oct 8, 2026</div></div></div></div>
+    <div class="pam uiBoxWhite"><h2>heading_fallback</h2><div class="_a6-p"><a href="https://www.instagram.com/p/synthetic-post">Post</a></div></div>
     <div class="pam uiBoxWhite"><div class="_a6-p"><div><div><a href="https://www.instagram.com/legal/terms">Terms</a></div><div>Oct 8, 2026</div></div></div></div>
     <div class="pam uiBoxWhite"><div class="_a6-p"><div><div><a href="https://about.meta.com">About Meta</a></div><div>Oct 8, 2026</div></div></div></div>
   </main></body></html>`;
 
   const parsed = parseHtmlRelationships(html, 'following');
-  assert.deepEqual(parsed, ['entity_user', 'slug_user']);
+  assert.deepEqual(parsed, [
+    'entity_user',
+    'heading_fallback',
+    'slug_user',
+  ]);
+  assert.deepEqual(
+    parseHtmlRelationships(
+      '<!DOCTYPE html><html><head><title>Following</title></head><body><a href="/valid_user">Valid</a><a>text_anchor_user</a></body></html>',
+      'following',
+    ),
+    ['text_anchor_user', 'valid_user'],
+  );
+});
+
+void test('extrae todos los registros bajo un contenedor HTML anidado', () => {
+  const html = `<!DOCTYPE html><html><head><title>Seguidores</title></head><body><main>
+    <div class="pam uiBoxWhite noborder">
+      <div class="_a6-p"><a href="https://www.instagram.com/primer_usuario">Primer usuario</a></div>
+      <div class="_a6-p"><a href="https://www.instagram.com/segundo_usuario">Segundo usuario</a></div>
+    </div>
+  </main></body></html>`;
+  assert.deepEqual(
+    parseHtmlRelationships(html, 'followers'),
+    ['primer_usuario', 'segundo_usuario'],
+  );
 });
 
 test('rechazo de HTML vacio, malformado o sin estructura reconocible', () => {
@@ -1229,6 +1286,10 @@ test('validacion rigurosa de URL y username en HTML (rutas de contenido, hostnam
   assert.equal(
     extractUsernameFromUrl('/usuario_relativo'),
     'usuario_relativo',
+  );
+  assert.equal(
+    extractUsernameFromUrl('./otro_usuario_relativo'),
+    'otro_usuario_relativo',
   );
   assert.equal(
     extractUsernameFromUrl(

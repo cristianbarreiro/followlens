@@ -1,86 +1,11 @@
-import { normalize } from './relationships.ts';
+import {
+  extractInstagramUsernameFromUrl,
+  normalize,
+} from './relationships.ts';
 
-const IGNORED_PATH_SEGMENTS = new Set([
-  // Contenido multimedia y navegación de contenido
-  'p',
-  'reel',
-  'reels',
-  'stories',
-  'story',
-  'tv',
-  'share',
-  'create',
-  'explore',
-  'tags',
-  'locations',
-  // Institucional, legal y corporativo
-  'about',
-  'legal',
-  'terms',
-  'privacy',
-  'help',
-  'support',
-  'press',
-  'developer',
-  'api',
-  'directory',
-  'business',
-  // Cuentas y sistema
-  'accounts',
-  'direct',
-  'emails',
-  'settings',
-  'challenge',
-  'consent',
-  'your_activity',
-  'graphql',
-  '_u',
-]);
-
-/**
- * Extrae y normaliza un nombre de usuario de Instagram a partir de un enlace URL.
- * Soporta exclusivamente URLs de perfiles directas (/username) y con prefijo de exportación (/_u/username).
- * Rechaza hostnames ajenos, rutas de contenido (/p/, /reel/, /stories/, /explore/),
- * enlaces institucionales, legales o de navegación interna.
- */
-export function extractUsernameFromUrl(href: string): string | null {
-  if (typeof href !== 'string' || !href.trim()) {
-    return null;
-  }
-  try {
-    const url = new URL(href, 'https://www.instagram.com');
-    // Validar protocolo y hostname estricto
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-      return null;
-    }
-    const hostname = url.hostname.toLowerCase();
-    if (hostname !== 'www.instagram.com' && hostname !== 'instagram.com') {
-      return null;
-    }
-
-    const parts = url.pathname.split('/').filter(Boolean);
-    if (!parts.length) return null;
-
-    let candidate: string | null = null;
-    if (parts[0] === '_u') {
-      // Formato de exportación: /_u/{username}
-      if (parts.length !== 2) return null;
-      candidate = parts[1];
-    } else {
-      // Formato directo de perfil: /{username}
-      if (parts.length !== 1) return null;
-      candidate = parts[0];
-    }
-
-    if (!candidate || IGNORED_PATH_SEGMENTS.has(candidate.toLowerCase())) {
-      return null;
-    }
-
-    return normalize(candidate);
-  } catch {
-    return null;
-  }
-}
+export {
+  extractInstagramUsernameFromUrl as extractUsernameFromUrl,
+} from './relationships.ts';
 
 /**
  * Parser seguro y pasivo para extraer listas de relaciones (seguidores o seguidos)
@@ -132,11 +57,12 @@ export function parseHtmlRelationships(
   const container = doc.querySelector('main') || doc.body;
 
   // Encontrar bloques de registros de relaciones en el orden de especificidad
+  const specificRecords = container.querySelectorAll('._a6-p');
   const recordBlocks =
-    container.querySelectorAll('.uiBoxWhite').length > 0
-      ? container.querySelectorAll('.uiBoxWhite')
-      : container.querySelectorAll('._a6-p').length > 0
-        ? container.querySelectorAll('._a6-p')
+    specificRecords.length > 0
+      ? specificRecords
+      : container.querySelectorAll('.uiBoxWhite').length > 0
+        ? container.querySelectorAll('.uiBoxWhite')
         : container.querySelectorAll('[role="main"] > div');
 
   // Buscar todos los enlaces en el contenedor
@@ -145,7 +71,7 @@ export function parseHtmlRelationships(
   let validProfileFound = false;
   for (const a of allAnchors) {
     const href = a.getAttribute('href');
-    if (href && extractUsernameFromUrl(href)) {
+    if (href && extractInstagramUsernameFromUrl(href)) {
       validProfileFound = true;
       break;
     }
@@ -168,33 +94,30 @@ export function parseHtmlRelationships(
 
   if (recordBlocks.length > 0) {
     for (const block of recordBlocks) {
-      const anchor = block.querySelector(
-        'a[href*="instagram.com"], a[href^="/_u/"], a[href^="/"]',
-      );
-      let username: string | null = null;
-      if (anchor) {
+      let foundProfile = false;
+      for (const anchor of block.querySelectorAll('a[href]')) {
         const href = anchor.getAttribute('href');
-        if (href) {
-          username = extractUsernameFromUrl(href);
-        } else {
-          username = normalize(anchor.textContent);
+        const username = href
+          ? extractInstagramUsernameFromUrl(href)
+          : null;
+        if (username) {
+          names.add(username);
+          foundProfile = true;
         }
       }
-      // En listas de seguidos, admitir encabezados de registro (h2) si el enlace no arrojó username
-      if (!username && kind === 'following') {
-        const heading = block.querySelector('h2');
+      if (!foundProfile && kind === 'following') {
+        const heading =
+          block.querySelector('h2') ??
+          block.closest('.uiBoxWhite')?.querySelector('h2');
         if (heading) {
           const headingUser = normalize(heading.textContent);
           if (
             headingUser &&
-            !IGNORED_PATH_SEGMENTS.has(headingUser.toLowerCase())
+            extractInstagramUsernameFromUrl(`/${headingUser}`)
           ) {
-            username = headingUser;
+            names.add(headingUser);
           }
         }
-      }
-      if (username) {
-        names.add(username);
       }
     }
 
@@ -208,7 +131,7 @@ export function parseHtmlRelationships(
     for (const anchor of allAnchors) {
       const href = anchor.getAttribute('href');
       const username = href
-        ? extractUsernameFromUrl(href)
+        ? extractInstagramUsernameFromUrl(href)
         : normalize(anchor.textContent);
       if (username) {
         names.add(username);

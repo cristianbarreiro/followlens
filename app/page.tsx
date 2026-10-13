@@ -822,7 +822,7 @@ export default function Home() {
                       })}
                       <button
                         className="stat-card accent-stat"
-                        onClick={() => filter('notBack')}
+                        onClick={() => filter('mutuals')}
                       >
                         <div>
                           <span>Te siguen de vuelta</span>
