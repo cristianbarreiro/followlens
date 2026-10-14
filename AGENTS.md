@@ -86,8 +86,8 @@ Derived directly from `package.json`:
 |---|---|---|---|
 | **Install** | `npm install` | Install workspace dependencies. | Requires Node `>=24`. |
 | **Development** | `npm run dev` | Start Vite/Vinext dev server with HMR. | |
-| **Build** | `npm run build` | Compile production client and SSR bundles. | `vinext build` (Vite 8.2.2). |
-| **Testing** | `npm test` | Run 34 unit tests. | `node --test lib/relationships.test.ts`. |
+| **Build** | `npm run build` | Compile for one deployment target. | Defaults to the existing Cloudflare adapter locally; set `FOLLOWLENS_DEPLOY_TARGET=vercel` for Nitro/Vercel. See [development.md](docs/knowledge/development.md). |
+| **Testing** | `npm test` | Run 39 unit tests. | `node --test lib/relationships.test.ts`. |
 | **Importer benchmark** | `npm run benchmark:importer` | Measure synthetic import stages and resource snapshots in Node.js. | Optional local benchmark; no timing thresholds. |
 | **Browser-scale benchmark** | `npm run benchmark:importer:browser` | Measure synthetic medium, high-cardinality and near-limit imports in Chromium. | Standalone opt-in run; includes limit rejection/recovery. |
 | **Browser stage comparison** | `npm run benchmark:importer:stages` | Compare DEFLATE/STORE and instrument browser import stages. | Two repetitions per synthetic scenario; opt-in, no thresholds. |
@@ -102,6 +102,8 @@ Derived directly from `package.json`:
 | **Formatting** | `npm run format` | Run code formatter via `oxfmt`. | |
 | **Linting** | `npm run lint` | Run linter via `oxlint`. | Pre-existing typeAware lint findings in `components/ui/*` and `node:test` (see [development.md](docs/knowledge/development.md)). |
 | **Wrangler** | `npm run start` | Start Cloudflare/Wrangler local emulation. | |
+
+Vercel builds use Nitro's `.vercel/output` Build Output API; Cloudflare builds keep the existing Vite plugin and Wrangler output. Only one deployment adapter is loaded per build, and Nitro does not receive Instagram exports or relationship data.
 
 ---
 

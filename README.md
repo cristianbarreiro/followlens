@@ -59,10 +59,14 @@ npm run dev
 
 En entornos Windows PowerShell con restricciones de ejecución, usar `npm.cmd` en lugar de `npm`.
 
+### Despliegue de producción
+
+El proyecto mantiene Cloudflare como target local predeterminado y admite Vercel mediante Nitro. En Vercel, configura Node.js `24.x`, Install Command `npm ci`, Build Command `npm run build`, Framework Preset `Nitro` y Output Directory `.vercel/output`; define `FOLLOWLENS_DEPLOY_TARGET=vercel`. Los pasos completos y la validación local están en la [guía de targets de producción](docs/knowledge/development.md#targets-de-producción). El adaptador Nitro sirve el runtime de la aplicación, pero no procesa ni recibe exportaciones personales.
+
 ### Comandos de Validación
 
 ```sh
-# Pruebas unitarias (34 tests con runner nativo de Node.js)
+# Pruebas unitarias (39 tests con runner nativo de Node.js)
 npm test
 
 # Verificación estricta de tipos TypeScript
@@ -87,7 +91,7 @@ npm run benchmark:importer:crc32
 npm run profile:importer:browser
 ```
 
-- **Pruebas (`npm test`):** 34 tests unitarios nativos (`node:test`) que validan la suite completa: parsing HTML y JSON, extracción selectiva ZIP, defensas contra bombas de compresión, multipartes y álgebra relacional.
+- **Pruebas (`npm test`):** 39 tests unitarios nativos (`node:test`) que validan la suite completa: parsing HTML y JSON, extracción selectiva ZIP, defensas contra bombas de compresión, multipartes y álgebra relacional.
 - **Tipos (`npm run typecheck`):** Validación TypeScript sin errores (`tsc --noEmit`).
 - **Compilación (`npm run build`):** Generación limpia de bundles para producción con Vinext (Vite 8).
 - **Rendimiento (`npm run benchmark:importer`):** Escenarios sintéticos opt-in; informa tiempos y snapshots aproximados sin umbrales de CI.

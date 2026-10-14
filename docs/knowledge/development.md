@@ -10,7 +10,7 @@ tags:
   - vinext
   - oxlint
   - verification
-timestamp: '2026-10-12T13:47:00-03:00'
+timestamp: '2026-10-13T22:15:00-03:00'
 lifecycle: stable
 ---
 
@@ -31,7 +31,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | ------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
 | `npm run dev`       | Inicia el servidor de desarrollo local con HMR.           | `vinext dev`                                      | Entorno Vite 8 con Vinext.                        |
 | `npm run build`     | Compila la aplicación completa para producción.           | `vinext build`                                    | Compila bundles cliente y SSR.                    |
-| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 34 tests unitarios nativos (0 suites).            |
+| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 39 tests unitarios nativos (0 suites).            |
 | `npm run test:e2e`  | Ejecuta regresiones de importación en Chromium real.      | Playwright Test                                   | Inicia Vinext local; requiere Chromium instalado. |
 | `npm run benchmark:importer` | Mide escenarios sintéticos del pipeline de importación. | Node.js 24 + `--expose-gc` | Opt-in; informa tiempos y snapshots aproximados de memoria, sin umbrales. |
 | `npm run benchmark:importer:browser` | Mide importaciones sintéticas medianas, de alta cardinalidad y cercanas al límite en Chromium. | Playwright Test + Chromium | Ejecución independiente; incluye rechazo del límite y recuperación. |
@@ -50,11 +50,49 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 
 ---
 
+## Targets de producción
+
+La configuración de Vite activa exactamente un adaptador por build. `npm run build` continúa siendo `vinext build`; Cloudflare conserva el plugin y los bindings existentes, y Vercel usa el plugin oficial `nitro/vite` con `NITRO_PRESET=vercel`. Vercel define `VERCEL=1` automáticamente; `FOLLOWLENS_DEPLOY_TARGET` fija explícitamente el destino (`vercel` o `cloudflare`). Sin ambas variables en local, Cloudflare sigue siendo el predeterminado. Un valor explícito inválido detiene la configuración.
+
+### Ajustes del proyecto Vercel
+
+En **Project Settings → Build and Deployment**, configurar:
+
+| Ajuste | Valor |
+|---|---|
+| Install Command | `npm ci` |
+| Build Command | `npm run build` |
+| Framework Preset | `Nitro` (o detección automática de Nitro) |
+| Output Directory | `.vercel/output` |
+| Node.js Version | `24.x` |
+
+Variable de entorno recomendada para todos los entornos del proyecto Vercel:
+
+| Variable | Valor | Uso |
+|---|---|---|
+| `FOLLOWLENS_DEPLOY_TARGET` | `vercel` | Selecciona Nitro; Vite fija `NITRO_PRESET=vercel` durante la compilación. |
+
+No se requieren secretos ni variables adicionales de aplicación. La salida debe incluir `.vercel/output/config.json` (Build Output API), `functions/` y `static/`; no se debe sustituir por el `dist/` de una aplicación Vite estática convencional.
+
+Compilar localmente los destinos en PowerShell:
+
+```powershell
+$env:FOLLOWLENS_DEPLOY_TARGET = 'vercel'
+npm run build
+
+$env:FOLLOWLENS_DEPLOY_TARGET = 'cloudflare'
+npm run build
+```
+
+`npm run start` y `dist/server/wrangler.json` siguen siendo propios de la emulación Cloudflare. Para validación adicional con Vercel, usar `vercel build` cuando la CLI esté autenticada y el proyecto vinculado; no ejecutar `vercel deploy` para esta verificación.
+
+---
+
 ## 3. Pruebas Unitarias Actuales (`lib/relationships.test.ts`)
 
 La suite unitaria se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
 
-### Cobertura Actual Comprobada (34 tests unitarios activos):
+### Cobertura Actual Comprobada (39 tests unitarios activos):
 
 1. Normalización de usernames (descarte de fórmulas de planilla `@`, `=`, `<script>`).
 2. Parsing de formatos planos, envueltos y resolución por `title` / URL.
@@ -90,9 +128,14 @@ La suite unitaria se ejecuta mediante el runner nativo de Node.js (`node --test`
 32. Validación rigurosa de URL y username en HTML (rutas de contenido `/p/`, `/reel/`, `/stories/`, `/explore/`, hostnames institucionales y slugs `/_u/`).
 33. Rechazo de documentos HTML ajenos que contengan `<main>` sin estructura ni encabezados de exportación de Instagram.
 34. Rechazo de documentos HTML con bloques de registro pero sin nombres de usuario extraíbles.
+35. Rechazo de URLs JSON de publicaciones al usar el fallback por `href`, con soporte para URLs válidas de perfil.
+36. Prioridad de la carpeta relacional oficial del ZIP e ignorado del archivo homónimo de Threads.
+37. Rechazo de exportaciones incompletas cuando solo hay archivos relacionales ajenos a la carpeta oficial.
+38. Rechazo de carpetas relacionales oficiales ambiguas.
+39. Extracción de todos los registros HTML anidados en envoltorios de exportación.
 
 > [!NOTE]
-> **Datos de prueba y validación:** Las 34 pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la salida de `node:test`, se reportan 34 tests pasados y 0 suites (archivo único de ejecución). Las mediciones históricas con la exportación real de Instagram de ~232 MB (243 MB, 819 entradas) son una validación anterior en Node 24 / V8, no forman parte de esta línea de base sintética ni se volvieron a ejecutar.
+> **Datos de prueba y validación:** Las pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la salida de `node:test`, se reportan los tests pasados y 0 suites (archivo único de ejecución). Las mediciones históricas con una exportación real grande son una validación anterior, no forman parte de la línea de base sintética ni se vuelven a ejecutar en cada cambio.
 
 ### Regresiones de importación en navegador
 

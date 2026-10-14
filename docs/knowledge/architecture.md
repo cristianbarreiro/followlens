@@ -10,7 +10,7 @@ tags:
   - vite
   - client-side
   - incremental-importer
-timestamp: '2026-10-11T02:00:00-03:00'
+timestamp: '2026-10-13T22:15:00-03:00'
 lifecycle: stable
 ---
 
@@ -114,6 +114,16 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 
 ---
 
+### Targets de compilación y despliegue
+
+`vite.config.ts` selecciona un único adaptador por compilación:
+
+- En Vercel, `FOLLOWLENS_DEPLOY_TARGET=vercel` (o `VERCEL=1`, definido por Vercel) habilita `nitro/vite` con el preset `vercel`. El plugin de Cloudflare no se carga en este modo; Nitro genera Build Output API en `.vercel/output`.
+- En Cloudflare, `FOLLOWLENS_DEPLOY_TARGET=cloudflare` o la ausencia de ambas variables conserva el plugin `@cloudflare/vite-plugin`, sus bindings y la salida Vinext/Wrangler actuales.
+- Un valor no reconocido de `FOLLOWLENS_DEPLOY_TARGET` detiene la carga de configuración.
+
+Nitro es el adaptador de servidor/SSR para Vercel, no un receptor de exportaciones: la lectura y el análisis de relaciones siguen ejecutándose en el navegador, sin API de importación ni almacenamiento remoto.
+
 ## 5. CONSTRAINTS — Invariantes Arquitectónicas No Negociables
 
 1. **PROHIBIDO añadir transmisión de datos:** No deben introducirse llamadas `fetch`, `axios`, WebSockets o analítica hacia servidores externos que envíen datos de seguidores, identificadores o metadatos de usuario.
@@ -129,6 +139,6 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 
 Cualquier cambio estructural debe validarse mediante:
 
-- `npm test`: Ejecución de los 34 tests unitarios de `lib/relationships.test.ts` (0 suites).
+- `npm test`: Ejecución de los tests unitarios de `lib/relationships.test.ts` (0 suites).
 - `npm run typecheck`: Validación estricta de TypeScript (`tsc --noEmit`).
 - `npm run build`: Empaquetado completo de producción con Vite y Vinext (`vinext build`).
