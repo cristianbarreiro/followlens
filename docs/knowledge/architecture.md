@@ -10,7 +10,7 @@ tags:
   - vite
   - client-side
   - incremental-importer
-timestamp: '2026-10-13T22:15:00-03:00'
+timestamp: '2026-10-18T22:00:00-03:00'
 lifecycle: stable
 ---
 
@@ -114,6 +114,15 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 
 ---
 
+### Representación Visual de Cuentas y Estado de Fotografías (ADR-0005)
+
+- **Componente actual:** La visualización de perfiles en las tablas y vistas de detalle opera exclusivamente mediante el componente `Avatar` en `app/page.tsx`, que renderiza iniciales (`name.slice(0, 2)`) con clases de tono deterministas (`tone-0` a `tone-4`).
+- **Inexistencia de infraestructura de fotografías:** No existe actualmente una infraestructura productiva de imágenes de perfil (ni proveedores de red, ni orquestadores, ni componentes `ProfileAvatar`).
+- **Desacoplamiento de análisis y visualización:** La lógica de análisis relacional (`lib/relationships.ts`) y la extracción de datos (`lib/importer.ts`) deben mantenerse estrictamente desacopladas de cualquier enriquecimiento fotográfico o visual futuro.
+- **Persistencia sin migración prematura:** IndexedDB permanece en la versión 1 con el almacén único `snapshots` ([ADR-0003](decisions/0003-optional-local-persistence.md)). Queda descartado migrar la base de datos o crear almacenes de caché (`profilePhotos`) hasta que una decisión formal autorice una fuente legítima de datos.
+
+---
+
 ### Targets de compilación y despliegue
 
 `vite.config.ts` selecciona un único adaptador por compilación:
@@ -132,6 +141,7 @@ Nitro es el adaptador de servidor/SSR para Vercel, no un receptor de exportacion
 4. **Criterio de Tamaño de Archivo:** En la arquitectura implementada (ADR-0004), el tamaño total comprimido de un ZIP legítimo (>200 MB) no es causal de rechazo. Se aplican salvaguardas proporcionales por archivo descompreso (≤ 30 MB) y límites de consumo de recursos.
 5. **Validación de Partes Obligatoria:** Si un usuario tiene múltiples archivos de seguidores (`followers_1.json`, `followers_3.json`), la importación debe fallar de inmediato si falta alguna parte intermedia para evitar corromper el análisis de seguidores perdidos.
 6. **Aislamiento Multicuenta:** Nunca comparar ni mezclar snapshots pertenecientes a cuentas distintas (`account`).
+7. **Restricción sobre Fotografías Remotas (ADR-0005):** No realizar peticiones a servicios externos ni scraping para obtener imágenes de perfiles; la resolución automática permanece en NO-GO.
 
 ---
 

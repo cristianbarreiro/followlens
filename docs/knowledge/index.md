@@ -9,7 +9,7 @@ tags:
   - followlens
   - architecture
   - privacy
-timestamp: "2026-10-11T02:00:00-03:00"
+timestamp: "2026-10-18T22:00:00-03:00"
 lifecycle: stable
 ---
 
@@ -33,6 +33,7 @@ lifecycle: stable
 | [decisions/0002-snapshot-observation-model.md](decisions/0002-snapshot-observation-model.md) | `Decision` | ADR: Snapshots discretos entre exportaciones en vez de scraping en vivo o credenciales. | Al diseñar nuevas comparaciones temporales o métricas. |
 | [decisions/0003-optional-local-persistence.md](decisions/0003-optional-local-persistence.md) | `Decision` | ADR: Almacenamiento en memoria por defecto y persistencia voluntaria en IndexedDB. | Al modificar `lib/storage.ts` o la experiencia de guardado. |
 | [decisions/0004-incremental-zip-processing.md](decisions/0004-incremental-zip-processing.md) | `Decision` | ADR: Admisión de ZIPs legítimos sin umbral fijo arbitrario y migración a procesamiento incremental. | Antes de diseñar o implementar la Fase 2 del importador. |
+| [decisions/0005-profile-photos.md](decisions/0005-profile-photos.md) | `Decision` | ADR: Evaluación de viabilidad, restricción NO-GO de recuperación automática de fotos y condiciones futuras. | Al evaluar soporte de fotografías de perfil o enriquecimiento visual. |
 
 ---
 

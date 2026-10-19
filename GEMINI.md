@@ -14,6 +14,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
    - Domain Model & Types: [docs/knowledge/domain-model.md](docs/knowledge/domain-model.md)
    - Testing & Development: [docs/knowledge/development.md](docs/knowledge/development.md)
    - Selective ZIP Processing (ADR-0004): [docs/knowledge/decisions/0004-incremental-zip-processing.md](docs/knowledge/decisions/0004-incremental-zip-processing.md)
+   - Profile Photos Boundary (ADR-0005): [docs/knowledge/decisions/0005-profile-photos.md](docs/knowledge/decisions/0005-profile-photos.md)
 3. **Specialized Skills (.agents/skills/):**
    - ZIP Import & Memory Strategy: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
    - Verification Standards: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)

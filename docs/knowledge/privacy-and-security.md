@@ -10,7 +10,7 @@ tags:
   - indexeddb
   - sanitization
   - resource-limits
-timestamp: "2026-10-11T02:00:00-03:00"
+timestamp: "2026-10-18T22:00:00-03:00"
 lifecycle: stable
 ---
 
@@ -44,7 +44,16 @@ FollowLens implementa **filtrado selectivo estricto**:
 
 ---
 
-## 3. Gestión de Recursos y Protección DoS: Estado Actual vs. Objetivo
+## 3. Ausencia de Fotografías de Perfil Remotas y Salvaguardas Futuras
+
+En cumplimiento del principio de soberanía y de la decisión [ADR-0005](decisions/0005-profile-photos.md):
+- **Estado actual:** FollowLens **no obtiene fotografías de perfil remotas de terceros**. La aplicación representa los perfiles mediante iniciales y colores calculados localmente en el cliente (`Avatar`), eliminando cualquier necesidad de realizar consultas a la web de Instagram, a su API o a proveedores externos.
+- **Protección contra telemetría indirecta:** Consultar fotografías de cuentas ajenas transmitiendo nombres de usuario a servidores remotos constituiría una fuga de las relaciones del usuario, lo cual está prohibido por los principios de este proyecto. La recuperación automática universal permanece clasificada como `NO-GO` al no existir una fuente oficial universal, respetuosa con la privacidad y libre de credenciales.
+- **Evaluación previa obligatoria:** Si en el futuro se evaluara cualquier mecanismo que requiera solicitudes de red para recuperar recursos visuales, será preceptivo realizar una nueva auditoría formal de privacidad, emitir un ADR que modifique las restricciones actuales y requerir consentimiento explícito e informado del usuario antes de emitir cualquier petición externa.
+
+---
+
+## 4. Gestión de Recursos y Protección DoS: Estado Actual vs. Objetivo
 
 ### Límites en el Código Actual (`lib/importer.ts` y `lib/zip.ts`)
 Para evitar bloqueos o consumos de memoria incontrolados, el código aplica límites al contenido inspeccionado y procesado:
@@ -63,7 +72,7 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 
 ---
 
-## 4. Persistencia Local en IndexedDB
+## 5. Persistencia Local en IndexedDB
 
 - **En memoria por defecto:** Cada importación procesada reside en el estado React (`app/page.tsx`) y se descarta al recargar la página.
 - **Persistencia explícita:** El usuario debe marcar voluntariamente el checkbox `Guardar en este navegador para futuras comparaciones`.
@@ -73,7 +82,7 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 
 ---
 
-## 5. Sanitización y Prevención de Inyecciones
+## 6. Sanitización y Prevención de Inyecciones
 
 1. **Normalización de Nombres de Usuario (`lib/relationships.ts`):**
    - Se valida contra una expresión regular estricta:
@@ -87,7 +96,7 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 
 ---
 
-## 6. Integridad de los Datos y Riesgos Inherentes
+## 7. Integridad de los Datos y Riesgos Inherentes
 
 - **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre dos exportaciones, el análisis matemático lo detectará como una "cuenta perdida" y una "cuenta nueva".
 - **Exportaciones Incompletas:** Si faltan partes de `followers_*.json`, la importación se rechaza para evitar generar falsos positivos de unfollow.

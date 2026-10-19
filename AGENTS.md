@@ -27,6 +27,7 @@ Do NOT load all repository files at once. The shared technical knowledge base is
   - [ADR-0002: Snapshot Observation Model](docs/knowledge/decisions/0002-snapshot-observation-model.md)
   - [ADR-0003: Optional Local Persistence](docs/knowledge/decisions/0003-optional-local-persistence.md)
   - [ADR-0004: Selective ZIP Processing](docs/knowledge/decisions/0004-incremental-zip-processing.md)
+  - [ADR-0005: Profile Photos Feasibility & Boundary](docs/knowledge/decisions/0005-profile-photos.md)
 - **Specialized Repository Skills:**
   - Import Workflow & ZIP Handling: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
   - Change & Quality Verification: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
