@@ -768,7 +768,7 @@ export default function Home() {
                   <LayoutDashboard size={16} /> Resumen
                 </TabsTrigger>
                 <TabsTrigger value="history">
-                  <History size={16} /> Importaciones{' '}
+                  <History size={16} /> Importaciones
                   <span className="tab-count">{history.length}</span>
                 </TabsTrigger>
               </TabsList>

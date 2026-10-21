@@ -943,32 +943,87 @@ footer {
 
 .main-tabs {
   margin-bottom: 25px;
-  gap: 26px !important;
-  height: 38px !important;
+  gap: 28px !important;
+  height: auto !important;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
 }
 
 .main-tabs [data-slot='tabs-trigger'] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  padding: 5px 0;
+  padding: 6px 2px 10px 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
   color: var(--tab-inactive);
   font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
 }
 
-.main-tabs [data-active] {
+.main-tabs [data-slot='tabs-trigger']:hover {
+  color: var(--foreground) !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.main-tabs [data-slot='tabs-trigger']:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.main-tabs [data-slot='tabs-trigger'][data-active] {
   color: var(--primary) !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
-.main-tabs [data-active]:after {
-  background: var(--primary) !important;
+.main-tabs [data-slot='tabs-trigger']:after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   height: 2px;
+  background: transparent;
+  border-radius: 2px;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.main-tabs [data-slot='tabs-trigger'][data-active]:after {
+  background: var(--primary) !important;
+  opacity: 1 !important;
 }
 
 .tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 9999px;
   background: var(--tab-count-bg);
   color: var(--tab-count-text);
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 5px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.main-tabs [data-active] .tab-count {
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 .stat-grid {
