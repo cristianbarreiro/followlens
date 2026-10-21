@@ -4,6 +4,12 @@ export const metadata: Metadata = {
   title: 'FollowLens · Tus relaciones, en perspectiva',
   description:
     'Analizá tus relaciones de Instagram y compará importaciones. Tus archivos se procesan únicamente en tu navegador.',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+    ],
+  },
 };
 const themeInitScript = `(function(){try{var t=localStorage.getItem('followlens-theme');var d=document.documentElement;if(t==='dark'){d.setAttribute('data-theme','dark');d.classList.add('dark');d.style.colorScheme='dark';}else{d.setAttribute('data-theme','light');d.classList.remove('dark');d.style.colorScheme='light';}}catch(e){}})();`;
 
