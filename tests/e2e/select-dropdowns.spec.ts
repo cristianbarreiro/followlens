@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 async function openDemoDashboard(page: Page) {
   await page.goto('/');
@@ -9,6 +9,49 @@ async function openDemoDashboard(page: Page) {
   await expect(
     page.getByText('Estás explorando datos ficticios'),
   ).toBeVisible();
+}
+
+/**
+ * Espera a que finalicen las animaciones CSS de entrada (p. ej. slide-in, zoom, fade)
+ * para evitar medir el popup mientras se encuentra desplazado verticalmente.
+ */
+async function waitForPopupAnimations(popup: Locator) {
+  await popup.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true });
+    await Promise.all(
+      animations.map((animation) =>
+        animation.finished.catch(() => {
+          // Manejo seguro ante animaciones canceladas o abortadas
+        }),
+      ),
+    );
+  });
+}
+
+/**
+ * Abre el selector, aguarda su estabilización visual y verifica que el popup
+ * se ubique debajo del trigger sin superponerse a él.
+ */
+async function assertPopupBelowTrigger(trigger: Locator, popup: Locator) {
+  await trigger.click();
+  await expect(popup).toBeVisible();
+
+  // Esperar a que culminen las animaciones de entrada en Chromium
+  await waitForPopupAnimations(popup);
+
+  // Medir bounding boxes en el mismo estado estable del layout
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox).not.toBeNull();
+
+  const popupBox = await popup.boundingBox();
+  expect(popupBox).not.toBeNull();
+
+  // El popup debe situarse debajo del trigger (sideOffset = 4px en reposo).
+  // Se contempla una tolerancia explícita de 1 px para contemplar redondeos subpíxel del viewport.
+  const SUBPIXEL_TOLERANCE = 1;
+  const triggerBottom = triggerBox!.y + triggerBox!.height;
+
+  expect(popupBox!.y).toBeGreaterThanOrEqual(triggerBottom - SUBPIXEL_TOLERANCE);
 }
 
 test.describe('Select dropdowns — Scroll lock, layout shift y posicionamiento', () => {
@@ -122,40 +165,18 @@ test.describe('Select dropdowns — Scroll lock, layout shift y posicionamiento'
     await openDemoDashboard(page);
 
     const trigger = page.getByLabel('Importación actual');
-    const triggerBox = await trigger.boundingBox();
-    expect(triggerBox).not.toBeNull();
-
-    await trigger.click();
     const popup = page.locator('[data-slot="select-content"][data-open]');
-    await expect(popup).toBeVisible();
-
-    const popupBox = await popup.boundingBox();
-    expect(popupBox).not.toBeNull();
-
-    // El popup debe situarse debajo del trigger (popup.y >= trigger.y + trigger.height)
-    expect(popupBox!.y).toBeGreaterThanOrEqual(
-      triggerBox!.y + triggerBox!.height - 1,
-    );
+    await assertPopupBelowTrigger(trigger, popup);
 
     // Verificar también el selector "Comparar con"
     await page.keyboard.press('Escape');
     await expect(popup).not.toBeVisible();
 
     const compareTrigger = page.getByLabel('Importación anterior');
-    const compareBox = await compareTrigger.boundingBox();
-    expect(compareBox).not.toBeNull();
-
-    await compareTrigger.click();
     const comparePopup = page.locator(
       '[data-slot="select-content"][data-open]',
     );
-    await expect(comparePopup).toBeVisible();
-    const comparePopupBox = await comparePopup.boundingBox();
-    expect(comparePopupBox).not.toBeNull();
-
-    expect(comparePopupBox!.y).toBeGreaterThanOrEqual(
-      compareBox!.y + compareBox!.height - 1,
-    );
+    await assertPopupBelowTrigger(compareTrigger, comparePopup);
   });
 
   test('4. El popup no supera los límites horizontales ni verticales del viewport', async ({
