@@ -216,11 +216,13 @@ test.describe('Select dropdowns — Scroll lock, layout shift y posicionamiento'
     const popup = page.locator('[data-slot="select-content"][data-open]');
     await expect(popup).toBeVisible();
 
-    const popupBox = await popup.boundingBox();
-    expect(popupBox).not.toBeNull();
+    // offsetWidth no se ve afectado por la animación de zoom de entrada
+    const popupWidth = await popup.evaluate(
+      (el) => (el as HTMLElement).offsetWidth,
+    );
 
     // El ancho del popup es al menos el del trigger
-    expect(popupBox!.width).toBeGreaterThanOrEqual(triggerBox!.width - 1);
+    expect(popupWidth).toBeGreaterThanOrEqual(triggerBox!.width - 1);
 
     await page.keyboard.press('Escape');
   });
@@ -279,7 +281,11 @@ test.describe('Select dropdowns — Scroll lock, layout shift y posicionamiento'
     const initialText = await currentPicker.innerText();
 
     await currentPicker.click();
+    await expect(
+      page.locator('[data-slot="select-content"][data-open]'),
+    ).toBeVisible();
     const options = page.getByRole('option');
+    await expect(options.nth(1)).toBeVisible();
     const count = await options.count();
     expect(count).toBeGreaterThan(1);
 
