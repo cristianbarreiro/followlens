@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { Profiler, useEffect, useMemo, useState } from 'react';
 import type { ProfilerOnRenderCallback, ReactNode } from 'react';
 import {
@@ -58,6 +58,7 @@ import { Empty, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ImportDialog } from '@/components/import-dialog';
 import { HeroDemoVideo } from '@/components/hero-demo-video';
+import { ThemeToggle } from '@/components/theme-toggle';
 import {
   analyze,
   csvRows,
@@ -215,8 +216,8 @@ function Trend({ snapshots }: { snapshots: Snapshot[] }) {
           >
             <defs>
               <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#645ce0" stopOpacity=".16" />
-                <stop offset="100%" stopColor="#645ce0" stopOpacity="0" />
+                <stop offset="0%" stopColor="var(--primary)" stopOpacity=".18" />
+                <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
               </linearGradient>
             </defs>
             {[26, 76, 126].map((y) => (
@@ -226,7 +227,7 @@ function Trend({ snapshots }: { snapshots: Snapshot[] }) {
                 x2="490"
                 y1={y}
                 y2={y}
-                stroke="#e8eaf1"
+                stroke="var(--trend-grid)"
                 strokeDasharray="4 5"
               />
             ))}
@@ -237,7 +238,7 @@ function Trend({ snapshots }: { snapshots: Snapshot[] }) {
             <polyline
               points={coordinates.join(' ')}
               fill="none"
-              stroke="#6259d6"
+              stroke="var(--primary)"
               strokeWidth="2.5"
             />
             {points.map((s, i) => {
@@ -248,8 +249,8 @@ function Trend({ snapshots }: { snapshots: Snapshot[] }) {
                     cx={x}
                     cy={y}
                     r="4"
-                    fill="white"
-                    stroke="#6259d6"
+                    fill="var(--card)"
+                    stroke="var(--primary)"
                     strokeWidth="2"
                   />
                   <title>
@@ -574,6 +575,7 @@ export default function Home() {
           <span className="privacy">
             <ShieldCheck size={16} /> Solo en tu dispositivo
           </span>
+          <ThemeToggle />
           <button
             className="icon-button"
             onClick={() => setHelpOpen(true)}
@@ -1238,49 +1240,140 @@ export default function Home() {
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="modal" showCloseButton={false}>
           {modalHeader(
-            'Tus datos, paso a paso',
-            'Solo necesitás la exportación oficial de Instagram.',
+            'Guía de exportación de Instagram',
+            'Seguí estos pasos para descargar tu información oficial e importarla en FollowLens.',
           )}
           <ol className="help-steps">
             <li>
-              <strong>Prepará una exportación</strong>
+              <strong>Entrar en el Centro de cuentas</strong>
               <p>
-                En las opciones de tu cuenta, buscá la descarga o exportación de
-                tu información.
+                Desde Instagram, accedé a{' '}
+                <strong>
+                  Configuración → Centro de cuentas → Tu información y permisos
+                </strong>
+                . Esta sección permite gestionar la información de tu cuenta y
+                acceder a las opciones de exportación.
               </p>
             </li>
             <li>
-              <strong>Elegí seguidores y seguidos</strong>
+              <strong>Crear una exportación</strong>
               <p>
-                Elegí formato JSON o HTML y período Todo el tiempo. Incluí todas
-                las partes de seguidores y usá el mismo formato para seguidores
-                y seguidos.
+                Seleccioná <strong>«Exportar tu información»</strong> y creá una
+                exportación correspondiente a la cuenta de Instagram que deseás
+                analizar. Podés elegir entre dos alternativas para recibir el
+                archivo:
+              </p>
+              <p>
+                • <strong>Exportar al dispositivo:</strong> opción recomendada
+                para descargar el archivo directamente en tu equipo.
+                <br />• <strong>Un servicio externo, como Google Drive:</strong>{' '}
+                alternativa opcional si disponés de esa integración (la copia
+                queda sujeta a las condiciones de almacenamiento y privacidad de
+                dicho servicio).
               </p>
             </li>
             <li>
-              <strong>Importá el ZIP o los archivos individuales</strong>
+              <strong>Personalizar la información</strong>
               <p>
-                El ZIP puede contener los datos en JSON o HTML. También podés
-                seleccionar archivos JSON o HTML individuales, sin mezclar
-                formatos. Indicá la cuenta y la fecha a la que corresponden los
-                datos. Para ver cambios, importá dos fechas de la misma cuenta.
+                Dentro de las opciones de exportación, seleccioná{' '}
+                <strong>«Personalizar información»</strong>.
+              </p>
+              <p>
+                Para FollowLens únicamente necesitás marcar la categoría:{' '}
+                <strong>«Seguidores y seguidos»</strong>. No es necesario
+                incluir el resto de las categorías de la cuenta. Seleccionar solo
+                esta información hace que la exportación sea más liviana y evita
+                incluir datos que la aplicación no necesita.
+              </p>
+            </li>
+            <li>
+              <strong>Elegir el intervalo de fechas</strong>
+              <p>
+                Recomendamos seleccionar el intervalo más amplio disponible,
+                desde el principio de la actividad o{' '}
+                <strong>«Todo el tiempo»</strong>, según figure en la pantalla
+                de Instagram.
+              </p>
+              <p>
+                Elegir el intervalo completo minimiza el riesgo de analizar una
+                lista parcial por haber limitado el período. Tené en cuenta que
+                este rango no indica la fecha exacta en que una persona comenzó a
+                seguirte o la seguiste, sino el lapso de datos abarcado por la
+                exportación.
+              </p>
+            </li>
+            <li>
+              <strong>Elegir el formato</strong>
+              <p>
+                Recomendamos <strong>JSON</strong> como primera opción por ser el
+                formato estructurado ideal para este flujo. FollowLens también
+                admite exportaciones en <strong>HTML</strong> si preferís esa
+                alternativa.
+              </p>
+            </li>
+            <li>
+              <strong>Calidad multimedia (opcional)</strong>
+              <p>
+                Si Instagram te presenta una opción de calidad multimedia,
+                recomendamos seleccionar <strong>«Baja»</strong>. No necesitás
+                fotografías ni vídeos para analizar relaciones, y esta opción no
+                influye en los cálculos de FollowLens. Si la opción no aparece en
+                tu pantalla, podés continuar sin problemas.
+              </p>
+            </li>
+            <li>
+              <strong>Esperar y descargar el archivo</strong>
+              <p>
+                Confirmá la solicitud de exportación y seguí las instrucciones
+                que Instagram muestre en pantalla. La preparación puede tardar un
+                momento. Cuando esté lista, descargá el archivo{' '}
+                <strong>ZIP</strong> y localizalo en tu dispositivo o servicio
+                en la nube.
+              </p>
+            </li>
+            <li>
+              <strong>Importar en FollowLens</strong>
+              <p>
+                Con el archivo descargado, volvé a FollowLens y seleccioná{' '}
+                <strong>«Importar datos»</strong>. Podés cargar directamente el
+                archivo <strong>ZIP</strong> oficial sin descomprimirlo
+                manualmente.
+              </p>
+              <p>
+                Como alternativa, también podés seleccionar los archivos
+                relacionales individuales (en este caso, asegurate de incluir
+                todas las partes consecutivas de seguidores y el archivo de
+                seguidos, utilizando un único formato: JSON o HTML, sin
+                mezclarlos).
+              </p>
+              <p>
+                Indicá el nombre de usuario de la cuenta y la fecha a la que
+                corresponde la exportación. Para comparar cambios históricos y
+                detectar unfollows o nuevos seguidores, importá exportaciones de
+                fechas distintas de la misma cuenta.
               </p>
             </li>
           </ol>
           <div className="help-privacy">
             <ShieldCheck />
             <div>
-              <strong>El análisis ocurre en tu navegador</strong>
+              <strong>100% privado y en tu navegador</strong>
               <p>
-                No leemos mensajes, fotos ni contraseñas. Guardar el historial
-                es opcional y solo lo conserva en este navegador.
+                El análisis ocurre localmente en tu navegador. FollowLens no
+                necesita tu contraseña ni pide conectar tu cuenta de Instagram.
+                La aplicación extrae selectivamente los archivos de relaciones
+                del ZIP; no procesa mensajes privados, fotografías ni vídeos.
+                El historial es opcional y solo se conserva en el almacenamiento
+                local de este navegador.
               </p>
             </div>
           </div>
           <p className="subtle">
-            No podemos determinar por qué desapareció una cuenta ni qué ocurrió
-            entre dos exportaciones. El historial muestra observaciones, no
-            fechas exactas de seguimiento.
+            Una exportación representa una observación puntual de tus relaciones
+            en el período correspondiente. No permite determinar por qué
+            desapareció una cuenta ni conocer la fecha exacta de un seguimiento o
+            de un unfollow entre exportaciones. Las comparaciones históricas
+            requieren exportaciones de fechas distintas de la misma cuenta.
           </p>
         </DialogContent>
       </Dialog>
