@@ -98,6 +98,9 @@
   --timeline-line: #ddd9f5;
   --timeline-dot: #7a70cf;
   --modal-shadow: rgba(37, 33, 58, 0.15);
+  --scrollbar-thumb: #d0d4e4;
+  --scrollbar-thumb-hover: #9c97d6;
+  --scrollbar-thumb-active: #7870cc;
 }
 
 :root[data-theme='dark'],
@@ -172,6 +175,9 @@
   --timeline-line: #3b3760;
   --timeline-dot: #968ceb;
   --modal-shadow: rgba(0, 0, 0, 0.65);
+  --scrollbar-thumb: #35364e;
+  --scrollbar-thumb-hover: #58538a;
+  --scrollbar-thumb-active: #7870cc;
 }
 
 @supports (background: light-dark(white, black)) {
@@ -252,6 +258,9 @@
     --timeline-line: light-dark(#ddd9f5, #3b3760);
     --timeline-dot: light-dark(#7a70cf, #968ceb);
     --modal-shadow: light-dark(rgba(37, 33, 58, 0.15), rgba(0, 0, 0, 0.65));
+    --scrollbar-thumb: light-dark(#d0d4e4, #35364e);
+    --scrollbar-thumb-hover: light-dark(#9c97d6, #58538a);
+    --scrollbar-thumb-active: light-dark(#7870cc, #7870cc);
   }
   :root[data-theme='dark'],
   .dark {
@@ -1461,6 +1470,94 @@ footer button {
   border: 1px solid var(--border) !important;
   color: var(--foreground) !important;
   box-shadow: 0 24px 100px var(--modal-shadow);
+}
+
+.export-guide-modal {
+  max-width: 560px !important;
+  width: calc(100% - 32px) !important;
+  max-height: 90dvh !important;
+  padding: 30px 24px 20px 30px !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+
+.export-guide-scroll {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 14px 16px 0;
+  margin-right: 4px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.export-guide-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.export-guide-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.export-guide-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-right-width: 3px;
+  background-clip: padding-box;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+.export-guide-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+.export-guide-scroll::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-active);
+}
+
+.export-guide-scroll::-webkit-scrollbar-button {
+  display: block;
+  height: 14px;
+  width: 10px;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 8px;
+}
+
+.export-guide-scroll::-webkit-scrollbar-button:single-button:vertical:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9fb1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='18 15 12 9 6 15'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.export-guide-scroll::-webkit-scrollbar-button:single-button:vertical:decrement:hover {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b83ff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='18 15 12 9 6 15'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.export-guide-scroll::-webkit-scrollbar-button:single-button:vertical:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9fb1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.export-guide-scroll::-webkit-scrollbar-button:single-button:vertical:increment:hover {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b83ff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.export-guide-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (forced-colors: active) {
+  .export-guide-scroll {
+    scrollbar-color: auto;
+  }
 }
 
 .modal-title {
