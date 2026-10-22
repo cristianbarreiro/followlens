@@ -76,9 +76,11 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 
 - **En memoria por defecto:** Cada importación procesada reside en el estado React (`app/page.tsx`) y se descarta al recargar la página.
 - **Persistencia explícita:** El usuario debe marcar voluntariamente el checkbox `Guardar en este navegador para futuras comparaciones`.
-- **Almacenamiento:** Base de datos IndexedDB nombrada `followlens-local`, almacén `snapshots`.
+- **Almacenamiento:** Base de datos IndexedDB nombrada `followlens-local`, con almacenes `snapshots` (exportaciones que el usuario decidió conservar) y `unavailableProfiles` (marcas introducidas explícitamente por el usuario, agrupadas por cuenta).
 - **Aislamiento de Origen:** Los datos guardados pertenecen exclusivamente al origen web (`origin`) del navegador y no se comparten entre navegadores ni perfiles.
-- **Eliminación:** La interfaz permite al usuario eliminar snapshots individuales en cualquier momento mediante `deleteSnapshot(id)`. Borrar los datos de navegación elimina la base por completo.
+- **Eliminación:** La interfaz permite al usuario eliminar snapshots individuales y quitar marcas de disponibilidad. Borrar los datos de navegación elimina la base por completo.
+
+Las marcas de disponibilidad no se verifican con Instagram. Son clasificaciones locales escritas o seleccionadas por el usuario. FollowLens no hace peticiones, scraping ni consultas a proveedores para inferir si otro perfil está activo, desactivado, suspendido, privado, renombrado o eliminado. Ver [ADR-0006](decisions/0006-manual-profile-availability-filter.md).
 
 ---
 
@@ -98,6 +100,6 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 
 ## 7. Integridad de los Datos y Riesgos Inherentes
 
-- **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre dos exportaciones, el análisis matemático lo detectará como una "cuenta perdida" y una "cuenta nueva".
+- **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre dos exportaciones, el análisis matemático puede reflejar una "cuenta perdida" y una "cuenta nueva"; esas listas no permiten distinguir automáticamente las causas. El usuario puede registrar una marca manual y aplicar el filtro global sin alterar los snapshots.
 - **Exportaciones Incompletas:** Si faltan partes de `followers_*.json`, la importación se rechaza para evitar generar falsos positivos de unfollow.
 - **Observación Discreta:** Las fechas corresponden al día de la exportación, no al momento exacto en que ocurrió la acción en la red social.

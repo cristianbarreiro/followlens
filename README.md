@@ -8,6 +8,7 @@ Analizador de relaciones de Instagram. React 19 + TypeScript sobre Vite y Vinext
 
 - **Mapeo de Relaciones:** Seguidores, seguidos, mutuos y relaciones no recíprocas (cuentas que no te siguen y cuentas a las que no seguís de vuelta).
 - **Análisis Temporal entre Exportaciones:** Seguidores ganados o perdidos, seguimientos nuevos o descartados y evolución de conexiones mutuas entre snapshots fechados de una misma cuenta.
+- **Filtro de perfiles identificados manualmente:** Marcá cuentas desde la lista o pegá nombres de usuario para excluirlas de estadísticas, tendencias, comparaciones históricas y CSV. Las marcas son locales y no verifican si un perfil está desactivado o suspendido.
 - **Filtros Específicos:** Exploración focalizada en no reciprocidad, seguidores perdidos que todavía seguís, mutuos perdidos y nuevas conexiones.
 - **Exploración y Exportación:** Búsqueda interactiva, filtros por grupo, paginación, línea temporal (*timeline*) por cuenta y exportación a CSV con codificación UTF-8 segura (BOM).
 - **Historial Local Opcional:** Persistencia voluntaria en IndexedDB (`followlens-local`) por cuenta, con eliminación granular de snapshots y control total por parte del usuario.
@@ -42,6 +43,7 @@ Analizador de relaciones de Instagram. React 19 + TypeScript sobre Vite y Vinext
 3. **Completar datos de la cuenta:** Indicar el nombre de usuario de la cuenta y la fecha correspondiente a la exportación para identificar el snapshot.
 4. *(Opcional)* **Guardar en historial local:** Activar la casilla para conservar la importación en IndexedDB si se desean realizar comparaciones históricas futuras con nuevas exportaciones.
 5. **Explorar y comparar:** Analizar los grupos de relaciones, filtrar y buscar usuarios o exportar a CSV. Al importar una segunda exportación más reciente de la misma cuenta, la aplicación mostrará automáticamente la evolución y los cambios temporales.
+6. **Excluir perfiles marcados (opcional):** Identificá manualmente perfiles no disponibles desde una fila o pegá una lista en la gestión local. Activá el checkbox para recalcular todas las fechas seleccionadas con las mismas cuentas excluidas. No se modifica la exportación original ni se consulta Instagram.
 
 ---
 

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { strToU8, zipSync } from 'fflate';
+import { readFile } from 'node:fs/promises';
 
 const appUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:4173';
 const appAddress = new URL(appUrl);
@@ -30,10 +31,14 @@ function monitorBrowser(page: Page): BrowserSignals {
     externalOrigins: [],
   };
   page.on('console', (message) => {
-    if (message.type() === 'error') signals.consoleErrors += 1;
+    if (message.type() === 'error') {
+      signals.consoleErrors += 1;
+      console.error(`Browser console error: ${message.text()}`);
+    }
   });
-  page.on('pageerror', () => {
+  page.on('pageerror', (error) => {
     signals.pageErrors += 1;
+    console.error(`Browser page error: ${error.stack ?? error.message}`);
   });
   page.context().on('request', (request) => {
     const url = new URL(request.url());
@@ -136,11 +141,12 @@ async function chooseFiles(
   dialog: Locator,
   files: Parameters<Locator['setInputFiles']>[0],
   displayedNames: string,
+  date = importDate,
 ) {
   await dialog.getByLabel('Archivos de Instagram').setInputFiles(files);
   await expect(dialog.getByText(displayedNames, { exact: true })).toBeVisible();
   await dialog.getByLabel('Tu usuario').fill('test_owner');
-  await dialog.getByLabel('Fecha de la exportación').fill(importDate);
+  await dialog.getByLabel('Fecha de la exportación').fill(date);
   await dialog.getByRole('checkbox').first().check();
 }
 
@@ -467,5 +473,97 @@ test('reports corrupted ZIPs without partial results and allows retry', async ({
     mutuals: ['mutua'],
     notBack: ['no_devuelve'],
   });
+  await assertBrowserPrivacy(signals);
+});
+
+test('manually marked profiles filter dashboard metrics, history, and CSV consistently', async ({
+  page,
+}) => {
+  const signals = monitorBrowser(page);
+  const firstDialog = await openImportDialog(page);
+  await chooseFiles(
+    firstDialog,
+    filePayload(
+      'availability-before.zip',
+      jsonZip(['ana', 'suspended', 'oldmutual'], ['suspended', 'oldmutual']),
+      'application/zip',
+    ),
+    'availability-before.zip',
+    '2026-10-01',
+  );
+  await firstDialog.getByRole('checkbox').nth(1).check();
+  await submitImport(firstDialog);
+  await expect(firstDialog).toBeHidden();
+
+  await page.getByRole('button', { name: 'Importar datos' }).click();
+  const secondDialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
+  await chooseFiles(
+    secondDialog,
+    filePayload(
+      'availability-after.zip',
+      jsonZip(['ana', 'oldmutual', 'newfriend'], ['suspended', 'oldmutual', 'newfriend']),
+      'application/zip',
+    ),
+    'availability-after.zip',
+    '2026-10-02',
+  );
+  await secondDialog.getByRole('checkbox').nth(1).check();
+  await submitImport(secondDialog);
+  await expect(secondDialog).toBeHidden();
+
+  const statCards = page.locator('.stat-grid .stat-card');
+  await expect(statCards.nth(0).locator('strong')).toHaveText('3');
+  await expect(page.getByText('1 seguidores ya no aparecen')).toBeVisible();
+  const results = page.locator('.people-table');
+  await expect(results.getByText('@suspended')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
+  const availabilityDialog = page.getByRole('dialog', {
+    name: 'Perfiles identificados como no disponibles',
+  });
+  await availabilityDialog
+    .getByLabel('Agregar nombres de usuario')
+    .fill('@suspended');
+  await availabilityDialog
+    .getByLabel('Motivo (opcional, para todos los nombres que agregues)')
+    .fill('Cuenta suspendida');
+  await availabilityDialog.getByRole('button', { name: 'Agregar a la lista' }).click();
+  await expect(
+    availabilityDialog.getByLabel('Motivo de la marca para suspended'),
+  ).toHaveValue('Cuenta suspendida');
+  await availabilityDialog.getByRole('button', { name: 'Cerrar' }).click();
+
+  const exclusion = page.getByRole('checkbox', {
+    name: 'Excluir perfiles identificados manualmente como no disponibles',
+  });
+  await expect(exclusion).not.toBeChecked();
+  await exclusion.check();
+  await expect(statCards.nth(1).locator('strong')).toHaveText('2');
+  await expect(page.getByText('0 seguidores ya no aparecen')).toBeVisible();
+  await expect(results.getByText('@suspended')).toHaveCount(0);
+
+  await page.getByLabel('Filtrar relaciones').click();
+  await page.getByRole('option', { name: /Seguidos · 2/ }).click();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exportar CSV' }).click();
+  const download = await downloadPromise;
+  const csv = await readFile((await download.path())!, 'utf8');
+  expect(csv).not.toContain('suspended');
+
+  await exclusion.uncheck();
+  await expect(statCards.nth(1).locator('strong')).toHaveText('3');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Tus relaciones.' })).toBeVisible();
+  await expect(
+    page.getByRole('checkbox', {
+      name: 'Excluir perfiles identificados manualmente como no disponibles',
+    }),
+  ).not.toBeChecked();
+  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
+  await expect(
+    page
+      .getByRole('dialog', { name: 'Perfiles identificados como no disponibles' })
+      .getByText('@suspended'),
+  ).toBeVisible();
   await assertBrowserPrivacy(signals);
 });

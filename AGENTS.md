@@ -28,6 +28,7 @@ Do NOT load all repository files at once. The shared technical knowledge base is
   - [ADR-0003: Optional Local Persistence](docs/knowledge/decisions/0003-optional-local-persistence.md)
   - [ADR-0004: Selective ZIP Processing](docs/knowledge/decisions/0004-incremental-zip-processing.md)
   - [ADR-0005: Profile Photos Feasibility & Boundary](docs/knowledge/decisions/0005-profile-photos.md)
+  - [ADR-0006: Manual Profile Availability Filter](docs/knowledge/decisions/0006-manual-profile-availability-filter.md)
 - **Specialized Repository Skills:**
   - Import Workflow & ZIP Handling: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
   - Change & Quality Verification: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
@@ -55,7 +56,7 @@ Do NOT load all repository files at once. The shared technical knowledge base is
    - ZIP imports use central-directory inspection and `File.slice()` range reads to extract only relevant entries; the full ZIP is not loaded into memory. Standalone relevant files are read individually with a cumulative 30 MiB limit. Relevant ZIP entries and their cumulative compressed/decompressed data are also bounded to 30 MiB.
    - DEFLATE entries are decompressed in chunks under the output limit. JSON and HTML are still parsed per file (`JSON.parse` / `DOMParser`); this is not a fully streaming parser or sequential whole-archive streaming implementation.
    - Future data categories must be added through distinct, independent analyzers with formal architectural decisions.
-5. **Persistence is Explicit and Local:** Data lives in React state by default. Storage in IndexedDB (`followlens-local`) requires voluntary, explicit user opt-in via the import dialog checkbox.
+5. **Persistence is Explicit and Local:** Snapshots live in React state by default and are stored only when the import dialog checkbox is selected. Availability marks are persisted only after the user explicitly marks or adds profiles; both stores remain in local IndexedDB (`followlens-local`).
 6. **Strict Account Scoping:** Different accounts (`account`) must never have their snapshots compared, merged, or aggregated together.
 7. **Observational Snapshot Model:** Changes between snapshots are mathematical differences between discrete export dates, not real-time events or instant unfollow notifications.
 

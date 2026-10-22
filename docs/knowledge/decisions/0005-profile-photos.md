@@ -123,7 +123,7 @@ Esta decisión es **exclusivamente documental y de diseño restrictivo**:
 
 - **No se modificó código de producción.**
 - **No se implementan** contratos de proveedores (`ProfilePhotoProvider`), orquestadores (`loader.ts`), sistemas de caché en memoria ni componentes alternativos (`ProfileAvatar`).
-- **No se migra IndexedDB:** La base de datos `followlens-local` permanece en la **versión 1** con el almacén único `snapshots` ([ADR-0003](0003-optional-local-persistence.md)). No se crea ningún almacén de imágenes (`profilePhotos`) mientras no exista una fuente aprobada que genere datos legítimos que guardar.
+- **No se crea caché de imágenes:** ADR-0006 añade un almacén separado para las marcas manuales de disponibilidad y actualiza IndexedDB a versión 2; no crea ningún almacén de imágenes (`profilePhotos`) ni altera el almacén de snapshots.
 - Los módulos de importación (`lib/importer.ts`, `lib/zip.ts`, `lib/html-parser.ts`) y cálculo matemático (`lib/relationships.ts`) permanecen estrictamente inalterados.
 
 ---
@@ -141,7 +141,7 @@ Para que el estado de esta decisión pueda cambiar a `GO` o `GO WITH CONDITIONS`
 7. **Arquitectura desacoplada validada:** Se cuenta con una arquitectura de carga diferida en segundo plano (`requestIdleCallback` / `useEffect`), con deduplicación de peticiones, cancelación de tareas obsoletas y garantía de que el análisis de relaciones concluye con independencia del resultado de las fotos.
 
 > [!NOTE]
-> Una alternativa consistente en la carga manual y voluntaria de imágenes o avatares por parte del propio usuario (por ejemplo, seleccionando archivos locales desde su dispositivo) no constituye una recuperación automática y, de contemplarse en el futuro, deberá evaluarse en una decisión arquitectónica independiente.
+> El registro manual de disponibilidad y su filtro estadístico no obtienen ni muestran fotografías. La selección local y voluntaria de imágenes o avatares es un tema separado que deberá evaluarse mediante otra decisión arquitectónica.
 
 ---
 

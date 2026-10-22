@@ -21,6 +21,7 @@ import {
   Trash2,
   Upload,
   Users,
+  UserRoundX,
   X,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -67,7 +68,18 @@ import {
   type Group,
   type Snapshot,
 } from '@/lib/relationships';
-import { getSnapshots, saveSnapshot, deleteSnapshot } from '@/lib/storage';
+import {
+  getSnapshots,
+  getUnavailableProfiles,
+  saveSnapshot,
+  saveUnavailableProfiles,
+  deleteSnapshot,
+} from '@/lib/storage';
+import {
+  parseUnavailableUsernames,
+  withoutUnavailableProfiles,
+  type UnavailableProfile,
+} from '@/lib/profile-availability';
 import { demoSnapshots } from '@/lib/demo';
 
 const count = (n: number) => n.toLocaleString('es-UY');
@@ -99,6 +111,7 @@ const changeGroups: Group[] = [
   'lostMutuals',
   'newMutuals',
 ];
+const EMPTY_UNAVAILABLE_PROFILES: UnavailableProfile[] = [];
 const recordReactProfile: ProfilerOnRenderCallback = (
   id,
   phase,
@@ -303,6 +316,14 @@ export default function Home() {
     [detail, setDetail] = useState<string | null>(null),
     [remove, setRemove] = useState<Snapshot | null>(null),
     [busy, setBusy] = useState(false),
+    [unavailableProfiles, setUnavailableProfiles] = useState<UnavailableProfile[]>([]),
+    [availabilityAccount, setAvailabilityAccount] = useState(''),
+    [excludeUnavailableFor, setExcludeUnavailableFor] = useState(''),
+    [availabilityOpen, setAvailabilityOpen] = useState(false),
+    [availabilityInput, setAvailabilityInput] = useState(''),
+    [availabilityReason, setAvailabilityReason] = useState(''),
+    [availabilityError, setAvailabilityError] = useState(''),
+    [availabilityBusy, setAvailabilityBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState('');
   useEffect(() => {
@@ -331,6 +352,30 @@ export default function Home() {
     : accounts.includes(account)
       ? account
       : (accounts[0] ?? '');
+  const excludeUnavailable =
+    !!actualAccount && excludeUnavailableFor === actualAccount;
+  const currentUnavailableProfiles =
+    availabilityAccount === actualAccount
+      ? unavailableProfiles
+      : EMPTY_UNAVAILABLE_PROFILES;
+  useEffect(() => {
+    let cancelled = false;
+    if (!actualAccount || demo) return;
+    getUnavailableProfiles(actualAccount)
+      .then((profiles) => {
+        if (!cancelled) {
+          setUnavailableProfiles(profiles);
+          setAvailabilityAccount(actualAccount);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(`${err.message} Las marcas de disponibilidad no están disponibles.`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [actualAccount, demo]);
   const benchmark =
     import.meta.env.DEV && typeof window !== 'undefined'
       ? window.__followLensWorkerE2E
@@ -346,17 +391,46 @@ export default function Home() {
   const current = history.find((s) => s.id === selected) ?? history.at(-1);
   const earlier = history.filter((s) => current && s.date < current.date);
   const previous = earlier.find((s) => s.id === baseline) ?? earlier.at(-1);
+  const analysisCurrent = useMemo(
+    () =>
+      current && excludeUnavailable
+        ? withoutUnavailableProfiles(
+            current,
+            new Set(currentUnavailableProfiles.map((profile) => profile.username)),
+          )
+        : current,
+    // oxlint-disable-next-line react/react-compiler
+    [current, excludeUnavailable, currentUnavailableProfiles],
+  );
+  const analysisPrevious = useMemo(
+    () =>
+      previous && excludeUnavailable
+        ? withoutUnavailableProfiles(
+            previous,
+            new Set(currentUnavailableProfiles.map((profile) => profile.username)),
+          )
+        : previous,
+    // oxlint-disable-next-line react/react-compiler
+    [previous, excludeUnavailable, currentUnavailableProfiles],
+  );
   const onAnalysisMeasured =
     import.meta.env.DEV && typeof window !== 'undefined'
       ? window.__followLensWorkerE2E?.recordAnalysisDuration
       : undefined;
   const data = useMemo(() => {
-    if (!current) return null;
-    if (importAnalysis?.snapshotId === current.id && !previous)
+    if (!analysisCurrent) return null;
+    if (
+      !excludeUnavailable &&
+      importAnalysis?.snapshotId === analysisCurrent.id &&
+      !analysisPrevious
+    )
       return importAnalysis.data;
-    return analyze(current, previous, onAnalysisMeasured);
-  }, [current, previous, importAnalysis, onAnalysisMeasured]);
-  const followingSet = useMemo(() => new Set(current?.following), [current]);
+    return analyze(analysisCurrent, analysisPrevious, onAnalysisMeasured);
+  }, [analysisCurrent, analysisPrevious, excludeUnavailable, importAnalysis, onAnalysisMeasured]);
+  const followingSet = useMemo(
+    () => new Set(analysisCurrent?.following),
+    [analysisCurrent],
+  );
   useEffect(() => {
     if (!import.meta.env.DEV || typeof window === 'undefined') return;
     const benchmark = window.__followLensWorkerE2E;
@@ -366,6 +440,7 @@ export default function Home() {
       setSavedIds([]);
       setImportAnalysis(null);
       setAccount('');
+      setExcludeUnavailableFor('');
       setSelected('');
       setBaseline('');
       setDemo(false);
@@ -397,8 +472,33 @@ export default function Home() {
   useEffect(() => {
     if (!previous && changeGroups.includes(group)) setGroup('notBack');
   }, [previous, group]);
-  const relevantHistory = history.filter(
-    (s) => current && s.date <= current.date,
+  const relevantHistory = history.filter((s) => current && s.date <= current.date);
+  const analysisHistory = useMemo(
+    () => {
+      const relevant = history.filter((s) => current && s.date <= current.date);
+      const unavailableSet = new Set(
+        currentUnavailableProfiles.map((profile) => profile.username),
+      );
+      return excludeUnavailable
+        ? relevant.map((snapshot) =>
+            withoutUnavailableProfiles(snapshot, unavailableSet),
+          )
+        : relevant;
+    },
+    // oxlint-disable-next-line react/react-compiler
+    [history, current, excludeUnavailable, currentUnavailableProfiles],
+  );
+  const displayHistory = useMemo(
+    () => {
+      if (!excludeUnavailable) return history;
+      const unavailableSet = new Set(
+        currentUnavailableProfiles.map((profile) => profile.username),
+      );
+      return history.map((snapshot) =>
+        withoutUnavailableProfiles(snapshot, unavailableSet),
+      );
+    },
+    [history, excludeUnavailable, currentUnavailableProfiles],
   );
   const historical = changeGroups.includes(group);
   const derivedListStartedAt =
@@ -438,6 +538,75 @@ export default function Home() {
     setPage(0);
     setDetail(null);
   }
+  async function persistAvailability(profiles: UnavailableProfile[]) {
+    if (!actualAccount || demo) return false;
+    setAvailabilityBusy(true);
+    try {
+      await saveUnavailableProfiles(actualAccount, profiles);
+      setUnavailableProfiles(profiles);
+      setAvailabilityAccount(actualAccount);
+      setAvailabilityError('');
+      setNotice('La lista local de perfiles identificados fue actualizada.');
+      return true;
+    } catch (err) {
+      const message = (err as Error).message;
+      setAvailabilityError(message);
+      setError(message);
+      return false;
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  }
+  function toggleUnavailableProfile(username: string) {
+    const next = currentUnavailableProfiles.some((profile) => profile.username === username)
+      ? currentUnavailableProfiles.filter((profile) => profile.username !== username)
+      : [...currentUnavailableProfiles, { username, reason: 'Identificado por vos' }].sort(
+          (a, b) => a.username.localeCompare(b.username),
+        );
+    void persistAvailability(next);
+  }
+  function updateAvailabilityReason(username: string, reason: string) {
+    setUnavailableProfiles((profiles) =>
+      profiles.map((profile) =>
+        profile.username === username ? { ...profile, reason } : profile,
+      ),
+    );
+  }
+  function saveAvailabilityReason(username: string, reason: string) {
+    const next = currentUnavailableProfiles.map((profile) =>
+      profile.username === username
+        ? { ...profile, reason: reason.trim() || 'Identificado por vos' }
+        : profile,
+    );
+    void persistAvailability(next);
+  }
+  async function addUnavailableProfiles() {
+    const parsed = parseUnavailableUsernames(availabilityInput);
+    if (!parsed.usernames.length || parsed.invalid.length) {
+      setAvailabilityError(
+        parsed.invalid.length
+          ? `No reconocimos estos nombres: ${parsed.invalid.join(', ')}`
+          : 'Pegá al menos un nombre de usuario.',
+      );
+      return;
+    }
+    const merged = new Map(
+      currentUnavailableProfiles.map((profile) => [profile.username, profile]),
+    );
+    for (const username of parsed.usernames)
+      if (!merged.has(username))
+        merged.set(username, {
+          username,
+          reason: availabilityReason.trim() || 'Identificado por vos',
+        });
+    const saved = await persistAvailability(
+      [...merged.values()].sort((a, b) => a.username.localeCompare(b.username)),
+    );
+    if (saved) {
+      setAvailabilityInput('');
+      setAvailabilityReason('');
+    }
+  }
   async function importSnapshot(
     s: Snapshot,
     persist: boolean,
@@ -463,6 +632,7 @@ export default function Home() {
     setImportAnalysis(analysis ? { snapshotId: s.id, data: analysis } : null);
     setDemo(false);
     setAccount(s.account);
+    setExcludeUnavailableFor('');
     setSelected(s.id);
     setBaseline('');
     setView('overview');
@@ -541,7 +711,7 @@ export default function Home() {
   function downloadCSV() {
     if (!current) return;
     const blob = new Blob(
-      [csvRows(visibleNames, group, current, relevantHistory)],
+      [csvRows(visibleNames, group, analysisCurrent!, analysisHistory)],
       { type: 'text/csv;charset=utf-8;' },
     );
     const url = URL.createObjectURL(blob);
@@ -735,6 +905,7 @@ export default function Home() {
                   value={actualAccount}
                   onChange={(v) => {
                     setAccount(v);
+                    setExcludeUnavailableFor('');
                     resetSelection();
                   }}
                   items={accounts.map((a) => ({ value: a, label: `@${a}` }))}
@@ -777,6 +948,39 @@ export default function Home() {
                 )}
               </div>
             </div>
+            <section className="availability-control" aria-label="Filtro de disponibilidad">
+              <div className="check-row">
+                <Checkbox
+                  aria-label="Excluir perfiles identificados manualmente como no disponibles"
+                  checked={excludeUnavailable}
+                  disabled={demo || currentUnavailableProfiles.length === 0}
+                  onCheckedChange={(value) => {
+                    setExcludeUnavailableFor(value === true ? actualAccount : '');
+                    setPage(0);
+                  }}
+                />
+                <span>
+                  Excluir perfiles que marqué como no disponibles
+                  <small>
+                    {currentUnavailableProfiles.length
+                      ? `${count(currentUnavailableProfiles.length)} marcas locales para @${actualAccount}`
+                      : 'Las marcas son manuales; FollowLens no verifica el estado de las cuentas.'}
+                  </small>
+                </span>
+              </div>
+              <button
+                className="btn"
+                disabled={demo || availabilityBusy}
+                onClick={() => {
+                  setAvailabilityInput('');
+                  setAvailabilityReason('');
+                  setAvailabilityError('');
+                  setAvailabilityOpen(true);
+                }}
+              >
+                <UserRoundX size={16} /> Gestionar perfiles
+              </button>
+            </section>
             <Tabs value={view} onValueChange={(v) => setView(String(v))}>
               <TabsList className="main-tabs" variant="line">
                 <TabsTrigger value="overview">
@@ -803,8 +1007,8 @@ export default function Home() {
                           { key: 'mutuals', icon: ArrowLeftRight },
                         ] as const
                       ).map(({ key, icon: Icon }) => {
-                        const delta = previous
-                          ? data![key].length - analyze(previous)[key].length
+                        const delta = analysisPrevious
+                          ? data![key].length - analyze(analysisPrevious)[key].length
                           : null;
                         return (
                           <button
@@ -846,13 +1050,13 @@ export default function Home() {
                           <Fingerprint size={19} />
                         </div>
                         <strong>
-                          {current.following.length
-                            ? `${Math.round((data!.mutuals.length / current.following.length) * 100)}%`
+                          {analysisCurrent!.following.length
+                            ? `${Math.round((data!.mutuals.length / analysisCurrent!.following.length) * 100)}%`
                             : '—'}
                         </strong>
                         <small>
                           {count(data!.mutuals.length)} de{' '}
-                          {count(current.following.length)} cuentas que seguís
+                          {count(analysisCurrent!.following.length)} cuentas que seguís
                         </small>
                       </button>
                     </>,
@@ -911,7 +1115,7 @@ export default function Home() {
                                   No seguís de vuelta a{' '}
                                   {count(
                                     data!.new.filter(
-                                      (n) => !current.following.includes(n),
+                                      (n) => !analysisCurrent!.following.includes(n),
                                     ).length,
                                   )}{' '}
                                   de ellas.
@@ -955,7 +1159,7 @@ export default function Home() {
                           </div>
                         )}
                       </div>
-                      <Trend snapshots={relevantHistory} />
+                      <Trend snapshots={analysisHistory} />
                     </>,
                   )}
                 </section>
@@ -1055,6 +1259,7 @@ export default function Home() {
                               <TableHead>Cuenta</TableHead>
                               <TableHead>Relación en esta fecha</TableHead>
                               <TableHead>Detectada en</TableHead>
+                              <TableHead>Marca local</TableHead>
                               <TableHead>
                                 <span className="sr-only">Detalle</span>
                               </TableHead>
@@ -1074,12 +1279,12 @@ export default function Home() {
                                 </TableCell>
                                 <TableCell>
                                   <span
-                                    className={`status-pill ${relationship(current, name) === 'Mutuos' ? 'green' : current.following.includes(name) ? 'violet' : ''}`}
+                                    className={`status-pill ${relationship(analysisCurrent!, name) === 'Mutuos' ? 'green' : analysisCurrent!.following.includes(name) ? 'violet' : ''}`}
                                   >
-                                    {current.following.includes(name) && (
+                                    {analysisCurrent!.following.includes(name) && (
                                       <Check size={12} />
                                     )}{' '}
-                                    {relationship(current, name)}
+                                    {relationship(analysisCurrent!, name)}
                                   </span>
                                 </TableCell>
                                 <TableCell className="muted-cell">
@@ -1092,6 +1297,19 @@ export default function Home() {
                                             s.following.includes(name),
                                         )?.date ?? current.date,
                                       )}
+                                </TableCell>
+                                <TableCell>
+                                  <button
+                                    className="icon-button"
+                                    aria-label={`${currentUnavailableProfiles.some((profile) => profile.username === name) ? 'Quitar marca de' : 'Marcar'} ${name} como no disponible`}
+                                    title={currentUnavailableProfiles.some((profile) => profile.username === name) ? 'Quitar marca local' : 'Marcar como no disponible'}
+                                    aria-pressed={currentUnavailableProfiles.some((profile) => profile.username === name)}
+                                    data-marked={currentUnavailableProfiles.some((profile) => profile.username === name)}
+                                    disabled={availabilityBusy || demo}
+                                    onClick={() => toggleUnavailableProfile(name)}
+                                  >
+                                    <UserRoundX size={16} />
+                                  </button>
                                 </TableCell>
                                 <TableCell>
                                   <button
@@ -1154,9 +1372,10 @@ export default function Home() {
                 </section>
                 <p className="data-note">
                   <ShieldCheck size={15} /> Los cambios se detectan entre
-                  exportaciones: no indican el momento exacto ni el motivo. Un
-                  cambio de usuario o una cuenta desactivada también puede
-                  aparecer como una pérdida.
+                  exportaciones: no indican el momento exacto ni el motivo. Una
+                  cuenta que desaparece puede haber cambiado de usuario, estar
+                  suspendida o ya no seguirte. Las marcas de disponibilidad son
+                  manuales y no prueban el estado de una cuenta.
                 </p>
               </TabsContent>
               <TabsContent value="history">
@@ -1170,7 +1389,7 @@ export default function Home() {
                       </p>
                     </div>
                   </div>
-                  {[...history].reverse().map((s) => (
+                  {[...displayHistory].reverse().map((s) => (
                     <div className="history-row" key={s.id}>
                       <span className="insight-icon violet">
                         <History size={20} />
@@ -1398,6 +1617,84 @@ export default function Home() {
         </DialogContent>
       </Dialog>
       <Dialog
+        open={availabilityOpen}
+        onOpenChange={(value) => {
+          if (!value) setAvailabilityOpen(false);
+        }}
+      >
+        <DialogContent className="modal" showCloseButton={false}>
+          {modalHeader(
+            'Perfiles identificados como no disponibles',
+            'Esta lista es una clasificación manual guardada solo en este navegador para la cuenta seleccionada.',
+          )}
+          <label className="availability-input">
+            Agregar nombres de usuario
+            <textarea
+              rows={4}
+              placeholder="@cuenta1, cuenta2…"
+              value={availabilityInput}
+              onChange={(event) => {
+                setAvailabilityInput(event.target.value);
+                setAvailabilityError('');
+              }}
+            />
+          </label>
+          <label className="availability-input">
+            Motivo (opcional, para todos los nombres que agregues)
+            <input
+              value={availabilityReason}
+              onChange={(event) => setAvailabilityReason(event.target.value)}
+              placeholder="Por ejemplo: perfil suspendido"
+            />
+          </label>
+          <small className="subtle">
+            Podés pegarlos separados por espacios, comas o saltos de línea. No
+            se consulta Instagram ni se comprueba el estado de estas cuentas.
+          </small>
+          {availabilityError && (
+            <p className="error" role="alert">{availabilityError}</p>
+          )}
+          <button
+            className="btn primary"
+            disabled={availabilityBusy || !availabilityInput.trim()}
+            onClick={() => void addUnavailableProfiles()}
+          >
+            {availabilityBusy ? 'Guardando…' : 'Agregar a la lista'}
+          </button>
+          <div className="availability-list" aria-label="Perfiles marcados">
+            {currentUnavailableProfiles.length ? (
+              currentUnavailableProfiles.map((profile) => (
+                <div className="availability-row" key={profile.username}>
+                  <span>
+                    <strong>@{profile.username}</strong>
+                    <input
+                      aria-label={`Motivo de la marca para ${profile.username}`}
+                      value={profile.reason}
+                      onChange={(event) =>
+                        updateAvailabilityReason(profile.username, event.target.value)
+                      }
+                      onBlur={(event) =>
+                        saveAvailabilityReason(profile.username, event.target.value)
+                      }
+                    />
+                  </span>
+                  <button
+                    className="icon-button"
+                    aria-label={`Quitar marca de ${profile.username}`}
+                    disabled={availabilityBusy}
+                    onClick={() => toggleUnavailableProfile(profile.username)}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="subtle">Todavía no marcaste perfiles.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
         open={!!detail}
         onOpenChange={(v) => {
           if (!v) setDetail(null);
@@ -1408,12 +1705,14 @@ export default function Home() {
             <>
               {modalHeader(
                 `@${detail}`,
-                'Historial observado hasta la importación seleccionada.',
+                currentUnavailableProfiles.some((profile) => profile.username === detail)
+                  ? `Marcado por vos como no disponible. ${currentUnavailableProfiles.find((profile) => profile.username === detail)?.reason ? `Motivo: ${currentUnavailableProfiles.find((profile) => profile.username === detail)?.reason}.` : ''}`
+                  : 'Historial observado hasta la importación seleccionada.',
               )}
               <div className="profile-summary">
                 <Avatar name={detail} />
                 <div>
-                  <strong>{relationship(current, detail)}</strong>
+                  <strong>{relationship(analysisCurrent!, detail)}</strong>
                   <small>{fmt(current.date)}</small>
                 </div>
                 <a
@@ -1429,19 +1728,19 @@ export default function Home() {
                 <span>
                   Te sigue{' '}
                   <strong>
-                    {current.followers.includes(detail) ? 'Sí' : 'No'}
+                    {analysisCurrent!.followers.includes(detail) ? 'Sí' : 'No'}
                   </strong>
                 </span>
                 <span>
                   Lo seguís{' '}
                   <strong>
-                    {current.following.includes(detail) ? 'Sí' : 'No'}
+                    {analysisCurrent!.following.includes(detail) ? 'Sí' : 'No'}
                   </strong>
                 </span>
               </div>
               <h3>Cambios detectados</h3>
               <ol className="timeline">
-                {timeline(relevantHistory, detail).map((item, i) => (
+                {timeline(analysisHistory, detail).map((item, i) => (
                   <li key={i}>
                     <span className="timeline-dot" />
                     <div>

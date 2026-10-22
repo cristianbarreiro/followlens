@@ -16,6 +16,10 @@ import {
 } from './html-parser.ts';
 import { importFiles } from './importer.ts';
 import { crc32, decompressDeflate } from './zip.ts';
+import {
+  parseUnavailableUsernames,
+  withoutUnavailableProfiles,
+} from './profile-availability.ts';
 
 if (typeof globalThis.DOMParser === 'undefined') {
   globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
@@ -122,6 +126,21 @@ test('calculates current relationships', () => {
   assert.deepEqual(d.lost, []);
   assert.deepEqual(d.new, []);
 });
+void test('parses and normalizes a pasted list of locally identified usernames', () => {
+  assert.deepEqual(parseUnavailableUsernames('@Ana, bruno\nANA; bad/name'), {
+    usernames: ['ana', 'bruno'],
+    invalid: ['bad/name'],
+  });
+});
+void test('filters unavailable names from both sets without mutating the source snapshot', () => {
+  const source = snap('2026-09-01', ['ana', 'bruno'], ['bruno', 'caro']);
+  const filtered = withoutUnavailableProfiles(source, new Set(['bruno']));
+  assert.deepEqual(filtered.followers, ['ana']);
+  assert.deepEqual(filtered.following, ['caro']);
+  assert.deepEqual(source.followers, ['ana', 'bruno']);
+  assert.deepEqual(source.following, ['bruno', 'caro']);
+  assert.equal(withoutUnavailableProfiles(source, new Set()), source);
+});
 test('compares both directions and mutuals accurately', () => {
   const d = analyze(now, old);
   assert.deepEqual(d.lost, ['bruno']);
@@ -130,6 +149,17 @@ test('compares both directions and mutuals accurately', () => {
   assert.deepEqual(d.followed, ['eva']);
   assert.deepEqual(d.lostMutuals, ['bruno']);
   assert.deepEqual(d.newMutuals, ['eva']);
+});
+void test('excludes the same manually marked names from both dates before comparison', () => {
+  const marked = new Set(['bruno']);
+  const before = withoutUnavailableProfiles(old, marked);
+  const after = withoutUnavailableProfiles(now, marked);
+  const result = analyze(after, before);
+  assert.deepEqual(result.lost, []);
+  assert.deepEqual(result.lostMutuals, []);
+  assert.deepEqual(result.new, ['eva']);
+  assert.deepEqual(old.followers, ['ana', 'bruno', 'caro']);
+  assert.deepEqual(now.followers, ['ana', 'caro', 'eva']);
 });
 test('blocks comparisons across accounts and backwards or equal dates', () => {
   assert.throws(() => analyze(now, { ...old, account: 'other' }));

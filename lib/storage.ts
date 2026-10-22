@@ -1,9 +1,16 @@
 import type { Snapshot } from './relationships';
+import type { UnavailableProfile } from './profile-availability';
 async function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('followlens-local', 1);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore('snapshots', { keyPath: 'id' });
+    const request = indexedDB.open('followlens-local', 2);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('snapshots'))
+        request.result.createObjectStore('snapshots', { keyPath: 'id' });
+      if (!request.result.objectStoreNames.contains('unavailableProfiles'))
+        request.result.createObjectStore('unavailableProfiles', {
+          keyPath: 'account',
+        });
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
       reject(
@@ -15,6 +22,43 @@ async function openDB(): Promise<IDBDatabase> {
       );
   });
 }
+type AvailabilityRecord = {
+  account: string;
+  profiles: UnavailableProfile[];
+};
+
+export async function getUnavailableProfiles(account: string) {
+  const db = await openDB();
+  return new Promise<UnavailableProfile[]>((resolve, reject) => {
+    const tx = db.transaction('unavailableProfiles', 'readonly');
+    const req = tx.objectStore('unavailableProfiles').get(account);
+    req.onsuccess = () => resolve((req.result as AvailabilityRecord | undefined)?.profiles ?? []);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function saveUnavailableProfiles(
+  account: string,
+  profiles: UnavailableProfile[],
+) {
+  const db = await openDB();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('unavailableProfiles', 'readwrite');
+    const store = tx.objectStore('unavailableProfiles');
+    if (profiles.length) store.put({ account, profiles } satisfies AvailabilityRecord);
+    else store.delete(account);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(new Error('No se pudo guardar la lista local de perfiles.'));
+    };
+  });
+}
+
 export async function getSnapshots(): Promise<Snapshot[]> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

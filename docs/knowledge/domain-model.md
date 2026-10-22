@@ -139,3 +139,10 @@ Genera un archivo CSV con codificación UTF-8 con BOM (`\uFEFF`) y columnas esta
 4. `primera_observacion`: fecha más antigua en que se observó al usuario en el historial de la cuenta.
 5. `ultima_observacion`: fecha más reciente en que se observó al usuario en el historial.
 6. `fecha_exportacion`: fecha del snapshot activo.
+
+## 8. Exclusión de perfiles identificados manualmente (ADR-0006)
+
+- `UnavailableProfile` guarda un `username` normalizado y una nota opcional en el registro local por cuenta.
+- `withoutUnavailableProfiles(snapshot, usernames)` devuelve una vista derivada que excluye los nombres del conjunto de `followers` y `following`; nunca modifica el snapshot original.
+- Para estadísticas filtradas, se aplica el mismo conjunto de exclusión a cada snapshot antes de llamar `analyze`. Las diferencias históricas se recalculan desde esos conjuntos filtrados y no restando cantidades.
+- El checkbox está desactivado al abrir el dashboard. Las marcas son ingresadas por el usuario y no confirman automáticamente desactivaciones, suspensiones ni disponibilidad del perfil.
