@@ -32,7 +32,17 @@ export async function getUnavailableProfiles(account: string) {
   return new Promise<UnavailableProfile[]>((resolve, reject) => {
     const tx = db.transaction('unavailableProfiles', 'readonly');
     const req = tx.objectStore('unavailableProfiles').get(account);
-    req.onsuccess = () => resolve((req.result as AvailabilityRecord | undefined)?.profiles ?? []);
+    req.onsuccess = () => {
+      const profiles =
+        (req.result as AvailabilityRecord | undefined)?.profiles ?? [];
+      resolve(
+        profiles.map((profile) => ({
+          ...profile,
+          source: profile.source ?? 'manual',
+          isExcluded: profile.isExcluded ?? true,
+        })),
+      );
+    };
     req.onerror = () => reject(req.error);
     tx.oncomplete = () => db.close();
   });

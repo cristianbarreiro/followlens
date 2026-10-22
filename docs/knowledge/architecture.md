@@ -49,7 +49,7 @@ lib/
 ├── zip.ts                       ── Lector ZIP selectivo por rangos (EOCD, CD, CRC32, streaming DEFLATE acotado)
 ├── relationships.ts             ── Lógica pura de conjuntos, normalización de usernames, timeline y CSV
 ├── storage.ts                   ── Adaptador de persistencia local en IndexedDB (base 'followlens-local')
-├── profile-availability.ts      ── Registro derivado de marcas manuales y filtrado inmutable de snapshots
+├── profile-availability.ts      ── Registro híbrido de marcadores detectados y marcas manuales; filtrado inmutable de snapshots
 ├── demo.ts                      ── Generador de snapshots sintéticos para exploración sin archivos
 ├── utils.ts                     ── Utilidades de concatenación de clases Tailwind (cn)
 └── relationships.test.ts        ── Pruebas unitarias de parsing (JSON/HTML), normalización, análisis e importación
@@ -120,14 +120,14 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 - **Componente actual:** La visualización de perfiles en las tablas y vistas de detalle opera exclusivamente mediante el componente `Avatar` en `app/page.tsx`, que renderiza iniciales (`name.slice(0, 2)`) con clases de tono deterministas (`tone-0` a `tone-4`).
 - **Inexistencia de infraestructura de fotografías:** No existe actualmente una infraestructura productiva de imágenes de perfil (ni proveedores de red, ni orquestadores, ni componentes `ProfileAvatar`).
 - **Desacoplamiento de análisis y visualización:** La lógica de análisis relacional (`lib/relationships.ts`) y la extracción de datos (`lib/importer.ts`) deben mantenerse estrictamente desacopladas de cualquier enriquecimiento fotográfico o visual futuro.
-- **Persistencia sin caché fotográfica:** La base de IndexedDB incluye el almacén de snapshots y el registro manual de disponibilidad definido en ADR-0006. No existe almacén de caché de fotografías.
+- **Persistencia sin caché fotográfica:** La base de IndexedDB incluye el almacén de snapshots y el registro local de disponibilidad definido en ADR-0006. No existe almacén de caché de fotografías.
 
-### Disponibilidad identificada manualmente (ADR-0006)
+### Disponibilidad identificada en la exportación y por el usuario (ADR-0006)
 
-- `lib/profile-availability.ts` normaliza usernames pegados por el usuario y deriva snapshots sin los nombres excluidos; nunca cambia los originales.
-- El usuario puede marcar perfiles desde la lista o importar una lista para la cuenta analizada. La marca puede incluir un motivo escrito por el usuario y se conserva en IndexedDB, separada de las capturas, bajo la cuenta correspondiente.
-- El checkbox global está desactivado de forma predeterminada. Cuando se activa, el dashboard aplica las marcas a seguidores y seguidos en cada snapshot y recalcula relaciones, tendencias, comparaciones, detalle e informes CSV a partir de conjuntos filtrados.
-- La marca es exclusivamente manual. No se detectan ni verifican cuentas desactivadas o suspendidas; no hay llamadas a Instagram, scraping, proveedores de terceros ni fotografías. Ver [ADR-0006](decisions/0006-manual-profile-availability-filter.md).
+- El importador reconoce el prefijo explícito __deleted__ en listas JSON y HTML y devuelve esos valores en una lista de detecciones separada; los snapshots conservan sus listas originales.
+- El registro combina detecciones explícitas con marcas manuales y correcciones; conserva origen, motivo y decisión de exclusión, y respeta las decisiones manuales en importaciones posteriores.
+- El usuario puede agregar o quitar perfiles, cambiar motivos y corregir detecciones. El registro se conserva en IndexedDB, separado de las capturas y agrupado por cuenta.
+- El checkbox global está desactivado de forma predeterminada y recalcula seguidores, seguidos, tendencias, comparaciones, detalle e informes CSV a partir de conjuntos filtrados. Solo se reconoce el marcador explícito; no se infieren estados sin esa señal ni se usan Instagram, scraping, proveedores o fotografías.
 
 ---
 

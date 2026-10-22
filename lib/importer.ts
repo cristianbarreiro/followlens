@@ -3,6 +3,7 @@ import {
   fileInfo,
   fileKind,
   parseRelationships,
+  normalizeDeletedAccountMarker,
   selectZipRelationshipPaths,
   type FileFormat,
 } from './relationships.ts';
@@ -16,7 +17,12 @@ import {
 export async function importFiles(
   files: File[],
   diagnostics?: ImportDiagnostics,
-): Promise<{ followers: string[]; following: string[]; fileCount: number }> {
+): Promise<{
+  followers: string[];
+  following: string[];
+  fileCount: number;
+  detectedUnavailableProfiles: string[];
+}> {
   const importStartedAt = diagnostics ? performance.now() : 0;
   if (!files.length)
     throw new Error('Elegí el ZIP o los archivos JSON / HTML.');
@@ -152,10 +158,19 @@ export async function importFiles(
       'Falta una parte de followers. Seleccioná todos los archivos de seguidores.',
     );
   const finalizeStart = diagnostics ? performance.now() : 0;
+  const followers = [...names.followers].sort();
+  const following = [...names.following].sort();
+  const detectedUnavailableProfiles = [
+    ...new Set([...followers, ...following].flatMap((name) => {
+      const marker = normalizeDeletedAccountMarker(name);
+      return marker ? [marker] : [];
+    })),
+  ].sort();
   const result = {
-    followers: [...names.followers].sort(),
-    following: [...names.following].sort(),
+    followers,
+    following,
     fileCount: Object.keys(entries).length,
+    detectedUnavailableProfiles,
   };
   if (diagnostics) {
     diagnostics({
@@ -165,6 +180,7 @@ export async function importFiles(
         followers: result.followers.length,
         following: result.following.length,
         fileCount: result.fileCount,
+        detectedUnavailableProfiles: result.detectedUnavailableProfiles.length,
       },
     });
     diagnostics({
@@ -174,6 +190,7 @@ export async function importFiles(
         followers: result.followers.length,
         following: result.following.length,
         fileCount: result.fileCount,
+        detectedUnavailableProfiles: result.detectedUnavailableProfiles.length,
       },
     });
   }

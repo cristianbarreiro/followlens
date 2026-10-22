@@ -31,7 +31,7 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 | ------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
 | `npm run dev`       | Inicia el servidor de desarrollo local con HMR.           | `vinext dev`                                      | Entorno Vite 8 con Vinext.                        |
 | `npm run build`     | Compila la aplicación completa para producción.           | `vinext build`                                    | Compila bundles cliente y SSR.                    |
-| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 39 tests unitarios nativos (0 suites).            |
+| `npm test`          | Ejecuta la suite completa de pruebas unitarias.           | `node --test lib/relationships.test.ts`           | 45 tests unitarios nativos (0 suites).            |
 | `npm run test:e2e`  | Ejecuta regresiones de importación en Chromium real.      | Playwright Test                                   | Inicia Vinext local; requiere Chromium instalado. |
 | `npm run benchmark:importer` | Mide escenarios sintéticos del pipeline de importación. | Node.js 24 + `--expose-gc` | Opt-in; informa tiempos y snapshots aproximados de memoria, sin umbrales. |
 | `npm run benchmark:importer:browser` | Mide importaciones sintéticas medianas, de alta cardinalidad y cercanas al límite en Chromium. | Playwright Test + Chromium | Ejecución independiente; incluye rechazo del límite y recuperación. |
@@ -92,7 +92,7 @@ npm run build
 
 La suite unitaria se ejecuta mediante el runner nativo de Node.js (`node --test`) y utiliza aserciones estrictas (`node:assert/strict`).
 
-### Cobertura Actual Comprobada (39 tests unitarios activos):
+### Cobertura Actual Comprobada (45 tests unitarios activos):
 
 1. Normalización de usernames (descarte de fórmulas de planilla `@`, `=`, `<script>`).
 2. Parsing de formatos planos, envueltos y resolución por `title` / URL.
@@ -133,6 +133,12 @@ La suite unitaria se ejecuta mediante el runner nativo de Node.js (`node --test`
 37. Rechazo de exportaciones incompletas cuando solo hay archivos relacionales ajenos a la carpeta oficial.
 38. Rechazo de carpetas relacionales oficiales ambiguas.
 39. Extracción de todos los registros HTML anidados en envoltorios de exportación.
+40. Normalización de listas de usernames ingresadas manualmente.
+41. Exclusión local de perfiles en seguidores y seguidos sin mutar snapshots.
+42. Comparación histórica con el mismo conjunto excluido para evitar cambios falsos.
+43. Detección JSON del marcador explícito __deleted__ conservando las listas importadas.
+44. Persistencia de marcas manuales y correcciones frente a detecciones posteriores.
+45. Reconocimiento de marcadores explícitos en registros HTML de relaciones.
 
 > [!NOTE]
 > **Datos de prueba y validación:** Las pruebas unitarias automatizadas operan sobre datos sintéticos generados en memoria con `buildSyntheticZip`, `zipSync` y objetos `File`/`Blob` livianos. En la salida de `node:test`, se reportan los tests pasados y 0 suites (archivo único de ejecución). Las mediciones históricas con una exportación real grande son una validación anterior, no forman parte de la línea de base sintética ni se vuelven a ejecutar en cada cambio.

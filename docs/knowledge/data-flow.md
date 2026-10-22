@@ -65,6 +65,7 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
 5. Normalización y Deduplicación
    - normalize(): validación estricta de username (1..30 caracteres, a-z0-9._)
    - Descarte de duplicados por Set
+   - Identificación del prefijo __deleted__; se devuelve la lista aparte sin quitar los marcadores del snapshot
                 │
                 ▼
 6. Verificaciones Finales de Integridad
@@ -72,7 +73,7 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
    - Verificación de partes continuas de followers (sin saltos 1 → 3)
                 │
                 ▼
-[Retorno de { followers: string[], following: string[], fileCount: number }]
+[Retorno de followers, following, fileCount y detectedUnavailableProfiles]
 ```
 
 ---

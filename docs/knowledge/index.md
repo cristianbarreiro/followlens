@@ -34,7 +34,7 @@ lifecycle: stable
 | [decisions/0003-optional-local-persistence.md](decisions/0003-optional-local-persistence.md) | `Decision` | ADR: Almacenamiento en memoria por defecto y persistencia voluntaria en IndexedDB. | Al modificar `lib/storage.ts` o la experiencia de guardado. |
 | [decisions/0004-incremental-zip-processing.md](decisions/0004-incremental-zip-processing.md) | `Decision` | ADR: Admisión de ZIPs legítimos sin umbral fijo arbitrario y migración a procesamiento incremental. | Antes de diseñar o implementar la Fase 2 del importador. |
 | [decisions/0005-profile-photos.md](decisions/0005-profile-photos.md) | `Decision` | ADR: Evaluación de viabilidad, restricción NO-GO de recuperación automática de fotos y condiciones futuras. | Al evaluar soporte de fotografías de perfil o enriquecimiento visual. |
-| [decisions/0006-manual-profile-availability-filter.md](decisions/0006-manual-profile-availability-filter.md) | `Decision` | ADR: Registro local de perfiles identificados por el usuario y filtro estadístico derivado sin detección automática. | Al modificar disponibilidad local, estadísticas filtradas o comparaciones históricas. |
+| [decisions/0006-manual-profile-availability-filter.md](decisions/0006-manual-profile-availability-filter.md) | Decision | ADR: Registro local híbrido, detección del marcador explícito __deleted__, correcciones manuales y filtro estadístico derivado. | Al modificar importación, disponibilidad local, estadísticas filtradas o comparaciones históricas. |
 
 ---
 

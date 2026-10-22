@@ -80,7 +80,7 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 - **Aislamiento de Origen:** Los datos guardados pertenecen exclusivamente al origen web (`origin`) del navegador y no se comparten entre navegadores ni perfiles.
 - **Eliminación:** La interfaz permite al usuario eliminar snapshots individuales y quitar marcas de disponibilidad. Borrar los datos de navegación elimina la base por completo.
 
-Las marcas de disponibilidad no se verifican con Instagram. Son clasificaciones locales escritas o seleccionadas por el usuario. FollowLens no hace peticiones, scraping ni consultas a proveedores para inferir si otro perfil está activo, desactivado, suspendido, privado, renombrado o eliminado. Ver [ADR-0006](decisions/0006-manual-profile-availability-filter.md).
+El registro de disponibilidad se guarda localmente por cuenta. FollowLens reconoce únicamente el marcador explícito __deleted__ que aparezca en las listas de la exportación; esa detección no prueba la condición actual del perfil. El usuario también puede agregar perfiles y corregir detecciones, y esas decisiones manuales prevalecen en futuras importaciones. No se hacen peticiones, scraping ni consultas a proveedores para inferir estados sin señal explícita. Ver ADR-0006.
 
 ---
 
@@ -100,6 +100,6 @@ Las marcas de disponibilidad no se verifican con Instagram. Son clasificaciones 
 
 ## 7. Integridad de los Datos y Riesgos Inherentes
 
-- **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre dos exportaciones, el análisis matemático puede reflejar una "cuenta perdida" y una "cuenta nueva"; esas listas no permiten distinguir automáticamente las causas. El usuario puede registrar una marca manual y aplicar el filtro global sin alterar los snapshots.
+- **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre exportaciones, el análisis puede mostrar una cuenta perdida y otra nueva, sin distinguir la causa. El marcador __deleted__ sí se clasifica al importar; otros estados sin marcador solo pueden agregarse o corregirse manualmente. El filtro no altera los snapshots.
 - **Exportaciones Incompletas:** Si faltan partes de `followers_*.json`, la importación se rechaza para evitar generar falsos positivos de unfollow.
 - **Observación Discreta:** Las fechas corresponden al día de la exportación, no al momento exacto en que ocurrió la acción en la red social.

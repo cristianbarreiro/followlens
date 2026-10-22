@@ -1264,6 +1264,7 @@ test('compares the current importer with the direct-set parser prototype', async
         followers: string[];
         following: string[];
         fileCount: number;
+        detectedUnavailableProfiles: string[];
       };
       type Measurement = {
         stage: string;
@@ -1378,6 +1379,7 @@ test('compares the current importer with the direct-set parser prototype', async
           followers: [],
           following: [],
           fileCount: 0,
+          detectedUnavailableProfiles: [],
         };
         const names = {
           followers: new Set<string>(),
@@ -1953,6 +1955,7 @@ test('benchmarks importer worker responsiveness against main-thread import', asy
           followers: string[];
           following: string[];
           fileCount: number;
+          detectedUnavailableProfiles: string[];
         };
         type WorkerSuccess = {
           operationId: string;
@@ -2593,6 +2596,7 @@ test('benchmarks end-to-end Worker import, analysis, React dashboard responsiven
         followers: string[];
         following: string[];
         fileCount: number;
+        detectedUnavailableProfiles: string[];
       };
       analysis?: Record<Group, string[]>;
       importMs: number;

@@ -28,7 +28,7 @@ Do NOT load all repository files at once. The shared technical knowledge base is
   - [ADR-0003: Optional Local Persistence](docs/knowledge/decisions/0003-optional-local-persistence.md)
   - [ADR-0004: Selective ZIP Processing](docs/knowledge/decisions/0004-incremental-zip-processing.md)
   - [ADR-0005: Profile Photos Feasibility & Boundary](docs/knowledge/decisions/0005-profile-photos.md)
-  - [ADR-0006: Manual Profile Availability Filter](docs/knowledge/decisions/0006-manual-profile-availability-filter.md)
+  - [ADR-0006: Hybrid Profile Availability Register](docs/knowledge/decisions/0006-manual-profile-availability-filter.md)
 - **Specialized Repository Skills:**
   - Import Workflow & ZIP Handling: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
   - Change & Quality Verification: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
@@ -89,7 +89,7 @@ Derived directly from `package.json`:
 | **Install** | `npm install` | Install workspace dependencies. | Requires Node `>=24`. |
 | **Development** | `npm run dev` | Start Vite/Vinext dev server with HMR. | |
 | **Build** | `npm run build` | Compile for one deployment target. | Defaults to the existing Cloudflare adapter locally; set `FOLLOWLENS_DEPLOY_TARGET=vercel` for Nitro/Vercel. See [development.md](docs/knowledge/development.md). |
-| **Testing** | `npm test` | Run 39 unit tests. | `node --test lib/relationships.test.ts`. |
+| **Testing** | `npm test` | Run 45 unit tests. | `node --test lib/relationships.test.ts`. |
 | **Importer benchmark** | `npm run benchmark:importer` | Measure synthetic import stages and resource snapshots in Node.js. | Optional local benchmark; no timing thresholds. |
 | **Browser-scale benchmark** | `npm run benchmark:importer:browser` | Measure synthetic medium, high-cardinality and near-limit imports in Chromium. | Standalone opt-in run; includes limit rejection/recovery. |
 | **Browser stage comparison** | `npm run benchmark:importer:stages` | Compare DEFLATE/STORE and instrument browser import stages. | Two repetitions per synthetic scenario; opt-in, no thresholds. |

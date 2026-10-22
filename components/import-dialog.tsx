@@ -53,6 +53,7 @@ export function ImportDialog({
     s: Snapshot,
     persist: boolean,
     analysis?: Record<Group, string[]>,
+    detectedUnavailableProfiles?: string[],
   ) => Promise<void>;
   account: string;
   processFiles?: ImportPipeline;
@@ -146,6 +147,7 @@ export function ImportDialog({
         },
         persist,
         processed.analysis,
+        processed.imported.detectedUnavailableProfiles,
       );
       onOpenChange(false);
     } catch (err) {

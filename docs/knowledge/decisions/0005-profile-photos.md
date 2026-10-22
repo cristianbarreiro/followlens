@@ -123,7 +123,7 @@ Esta decisión es **exclusivamente documental y de diseño restrictivo**:
 
 - **No se modificó código de producción.**
 - **No se implementan** contratos de proveedores (`ProfilePhotoProvider`), orquestadores (`loader.ts`), sistemas de caché en memoria ni componentes alternativos (`ProfileAvatar`).
-- **No se crea caché de imágenes:** ADR-0006 añade un almacén separado para las marcas manuales de disponibilidad y actualiza IndexedDB a versión 2; no crea ningún almacén de imágenes (`profilePhotos`) ni altera el almacén de snapshots.
+- **No se crea caché de imágenes:** ADR-0006 añade un almacén separado para las marcas manuales y detecciones de disponibilidad y actualiza IndexedDB a versión 2; no crea ningún almacén de imágenes (`profilePhotos`) ni altera el almacén de snapshots.
 - Los módulos de importación (`lib/importer.ts`, `lib/zip.ts`, `lib/html-parser.ts`) y cálculo matemático (`lib/relationships.ts`) permanecen estrictamente inalterados.
 
 ---

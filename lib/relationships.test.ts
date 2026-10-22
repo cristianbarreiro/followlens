@@ -6,6 +6,7 @@ import {
   analyze,
   parseRelationships,
   normalize,
+  normalizeDeletedAccountMarker,
   timeline,
   csvRows,
   type Snapshot,
@@ -17,6 +18,9 @@ import {
 import { importFiles } from './importer.ts';
 import { crc32, decompressDeflate } from './zip.ts';
 import {
+  DELETED_ACCOUNT_MARKER_REASON,
+  excludedUnavailableProfiles,
+  mergeDetectedUnavailableProfiles,
   parseUnavailableUsernames,
   withoutUnavailableProfiles,
 } from './profile-availability.ts';
@@ -53,6 +57,9 @@ test('normalizes usernames without accepting URLs or spreadsheet formulas', () =
   assert.equal(normalize(' @Ana.UY '), 'ana.uy');
   assert.equal(normalize('=SUM(A1)'), null);
   assert.equal(normalize('<script>'), null);
+  assert.equal(normalizeDeletedAccountMarker('__DELETED__123'), '__deleted__123');
+  assert.equal(normalizeDeletedAccountMarker('deleted__123'), null);
+  assert.equal(normalizeDeletedAccountMarker('__deleted__'), null);
 });
 test('parses flat followers, wrapped following, title fallback and removes duplicates', () => {
   assert.deepEqual(
@@ -132,6 +139,43 @@ void test('parses and normalizes a pasted list of locally identified usernames',
     invalid: ['bad/name'],
   });
 });
+void test('automatic detections preserve manual classifications and corrections', () => {
+  const initial = mergeDetectedUnavailableProfiles([], ['__deleted__123']);
+  assert.deepEqual(initial, [
+    {
+      username: '__deleted__123',
+      reason: DELETED_ACCOUNT_MARKER_REASON,
+      source: 'automatic',
+      isExcluded: true,
+    },
+  ]);
+
+  const corrected = mergeDetectedUnavailableProfiles(
+    [
+      {
+        ...initial[0],
+        reason: 'La exportación no refleja el estado actual',
+        source: 'manual',
+        isExcluded: false,
+      },
+      {
+        username: 'cuenta_manual',
+        reason: 'Identificado por vos',
+        source: 'manual',
+        isExcluded: true,
+      },
+    ],
+    ['__deleted__123', '__deleted__456'],
+  );
+
+  assert.equal(corrected.find((profile) => profile.username === '__deleted__123')?.isExcluded, false);
+  assert.equal(corrected.find((profile) => profile.username === '__deleted__123')?.reason, 'La exportación no refleja el estado actual');
+  assert.equal(corrected.find((profile) => profile.username === '__deleted__456')?.source, 'automatic');
+  assert.deepEqual(excludedUnavailableProfiles(corrected).map((profile) => profile.username), [
+    '__deleted__456',
+    'cuenta_manual',
+  ]);
+});
 void test('filters unavailable names from both sets without mutating the source snapshot', () => {
   const source = snap('2026-09-01', ['ana', 'bruno'], ['bruno', 'caro']);
   const filtered = withoutUnavailableProfiles(source, new Set(['bruno']));
@@ -201,6 +245,15 @@ test('imports standalone multipart JSON files', async () => {
   ]);
   assert.deepEqual(result.followers, ['ana', 'bruno']);
   assert.deepEqual(result.following, ['ana']);
+});
+void test('detects explicit deleted markers without rewriting imported relationships', async () => {
+  const result = await importFiles([
+    json('followers_1.json', [record('ana'), record('__deleted__123')]),
+    json('following.json', { relationships_following: [record('__deleted__123')] }),
+  ]);
+  assert.deepEqual(result.followers, ['__deleted__123', 'ana']);
+  assert.deepEqual(result.following, ['__deleted__123']);
+  assert.deepEqual(result.detectedUnavailableProfiles, ['__deleted__123']);
 });
 test('imports nested ZIPs, ignoring messages and unrelated invalid JSON', async () => {
   const bytes = zipSync({
@@ -1184,6 +1237,13 @@ void test('extrae todos los registros bajo un contenedor HTML anidado', () => {
   );
 });
 
+void test('recognizes explicit deleted-account markers in HTML relationship records', () => {
+  const html = '<!doctype html><html><head><title>Seguidores</title></head><body><main><div class="_a6-p"><a>__deleted__from_html</a></div></main></body></html>';
+  assert.deepEqual(
+    parseHtmlRelationships(html, 'followers'),
+    ['__deleted__from_html'],
+  );
+});
 test('rechazo de HTML vacio, malformado o sin estructura reconocible', () => {
   // Vacío
   assert.throws(

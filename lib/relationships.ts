@@ -37,6 +37,12 @@ export function normalize(value: unknown): string | null {
   return /^[a-z0-9._]{1,30}$/.test(name) ? name : null;
 }
 
+/** Recognizes the explicit deleted-account marker used in some exports. */
+export function normalizeDeletedAccountMarker(value: unknown): string | null {
+  const username = normalize(value);
+  return username && /^__deleted__.+$/.test(username) ? username : null;
+}
+
 const RESERVED_INSTAGRAM_PATHS = new Set([
   'p',
   'reel',

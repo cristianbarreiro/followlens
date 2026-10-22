@@ -306,6 +306,93 @@ test('imports a synthetic JSON ZIP through the UI and shows dashboard relationsh
   await assertBrowserPrivacy(signals);
 });
 
+test('detects deleted-account markers, filters them, and preserves a manual correction', async ({
+  page,
+}) => {
+  const signals = monitorBrowser(page);
+  const deletedMarker = '__deleted__synthetic';
+  const dialog = await openImportDialog(page);
+  await chooseFiles(
+    dialog,
+    filePayload(
+      'deleted-marker.zip',
+      jsonZip(['ana', deletedMarker], ['ana', deletedMarker]),
+      'application/zip',
+    ),
+    'deleted-marker.zip',
+  );
+  await submitImport(dialog);
+  await expect(dialog).toBeHidden();
+  await expect(successNotice(page)).toContainText(
+    'FollowLens detectó 1 marcador explícito de cuenta eliminada.',
+  );
+
+  const summary = page.getByRole('region', { name: 'Resumen de relaciones' });
+  const list = page.getByRole('region', { name: 'Listado de cuentas' });
+  const exclusion = page.getByRole('checkbox', {
+    name: 'Excluir perfiles identificados como no disponibles',
+  });
+  await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('2');
+  await expect(summary.getByRole('button').nth(1).locator('strong')).toHaveText('2');
+  await expect(exclusion).not.toBeChecked();
+
+  await summary.getByRole('button').nth(0).click();
+  await expect(list.getByText('@__deleted__synthetic', { exact: true })).toBeVisible();
+  await exclusion.check();
+  await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('1');
+  await expect(summary.getByRole('button').nth(1).locator('strong')).toHaveText('1');
+  await expect(list.getByText('@__deleted__synthetic', { exact: true })).toHaveCount(0);
+  await exclusion.uncheck();
+  await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('2');
+
+  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
+  const availabilityDialog = page.getByRole('dialog', {
+    name: 'Perfiles identificados como no disponibles',
+  });
+  const markerRow = availabilityDialog
+    .locator('.availability-row')
+    .filter({ hasText: deletedMarker });
+  await expect(markerRow.getByText('Detectado por FollowLens')).toBeVisible();
+  await expect(
+    markerRow.getByLabel('Motivo de la marca para __deleted__synthetic'),
+  ).toHaveValue('Marcador de cuenta eliminada en la exportación');
+  await markerRow
+    .getByRole('button', { name: 'Incluir __deleted__synthetic en el análisis' })
+    .click();
+  await expect(markerRow.getByText('Identificado por vos')).toBeVisible();
+  await expect(markerRow.getByText(/Corregido por vos/)).toBeVisible();
+  await availabilityDialog.getByRole('button', { name: 'Cerrar' }).click();
+
+  await page.getByRole('button', { name: 'Importar datos' }).click();
+  const secondDialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
+  await chooseFiles(
+    secondDialog,
+    filePayload(
+      'deleted-marker-again.zip',
+      jsonZip(['ana', deletedMarker], ['ana', deletedMarker]),
+      'application/zip',
+    ),
+    'deleted-marker-again.zip',
+    '2020-01-03',
+  );
+  await submitImport(secondDialog);
+  await expect(secondDialog).toBeHidden();
+
+  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
+  const correctedDialog = page.getByRole('dialog', {
+    name: 'Perfiles identificados como no disponibles',
+  });
+  const correctedRow = correctedDialog
+    .locator('.availability-row')
+    .filter({ hasText: deletedMarker });
+  await expect(correctedRow.getByText('Identificado por vos')).toBeVisible();
+  await expect(correctedRow.getByText(/Corregido por vos/)).toBeVisible();
+  await correctedDialog.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(exclusion).not.toBeChecked();
+  await expect(exclusion).toBeDisabled();
+  await assertBrowserPrivacy(signals);
+});
+
 test('imports a synthetic HTML ZIP through the UI and shows parsed relationships', async ({
   page,
 }) => {
@@ -534,7 +621,7 @@ test('manually marked profiles filter dashboard metrics, history, and CSV consis
   await availabilityDialog.getByRole('button', { name: 'Cerrar' }).click();
 
   const exclusion = page.getByRole('checkbox', {
-    name: 'Excluir perfiles identificados manualmente como no disponibles',
+    name: 'Excluir perfiles identificados como no disponibles',
   });
   await expect(exclusion).not.toBeChecked();
   await exclusion.check();
@@ -556,7 +643,7 @@ test('manually marked profiles filter dashboard metrics, history, and CSV consis
   await expect(page.getByRole('heading', { name: 'Tus relaciones.' })).toBeVisible();
   await expect(
     page.getByRole('checkbox', {
-      name: 'Excluir perfiles identificados manualmente como no disponibles',
+      name: 'Excluir perfiles identificados como no disponibles',
     }),
   ).not.toBeChecked();
   await page.getByRole('button', { name: 'Gestionar perfiles' }).click();

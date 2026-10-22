@@ -1,6 +1,7 @@
 import {
   extractInstagramUsernameFromUrl,
   normalize,
+  normalizeDeletedAccountMarker,
 } from './relationships.ts';
 
 export {
@@ -71,7 +72,10 @@ export function parseHtmlRelationships(
   let validProfileFound = false;
   for (const a of allAnchors) {
     const href = a.getAttribute('href');
-    if (href && extractInstagramUsernameFromUrl(href)) {
+    if (
+      (href && extractInstagramUsernameFromUrl(href)) ||
+      normalizeDeletedAccountMarker(a.textContent)
+    ) {
       validProfileFound = true;
       break;
     }
@@ -95,11 +99,11 @@ export function parseHtmlRelationships(
   if (recordBlocks.length > 0) {
     for (const block of recordBlocks) {
       let foundProfile = false;
-      for (const anchor of block.querySelectorAll('a[href]')) {
+      for (const anchor of block.querySelectorAll('a')) {
         const href = anchor.getAttribute('href');
-        const username = href
-          ? extractInstagramUsernameFromUrl(href)
-          : null;
+        const username =
+          (href && extractInstagramUsernameFromUrl(href)) ||
+          normalizeDeletedAccountMarker(anchor.textContent);
         if (username) {
           names.add(username);
           foundProfile = true;
@@ -131,7 +135,8 @@ export function parseHtmlRelationships(
     for (const anchor of allAnchors) {
       const href = anchor.getAttribute('href');
       const username = href
-        ? extractInstagramUsernameFromUrl(href)
+        ? extractInstagramUsernameFromUrl(href) ||
+          normalizeDeletedAccountMarker(anchor.textContent)
         : normalize(anchor.textContent);
       if (username) {
         names.add(username);

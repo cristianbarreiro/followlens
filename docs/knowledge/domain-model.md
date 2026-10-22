@@ -140,9 +140,9 @@ Genera un archivo CSV con codificación UTF-8 con BOM (`\uFEFF`) y columnas esta
 5. `ultima_observacion`: fecha más reciente en que se observó al usuario en el historial.
 6. `fecha_exportacion`: fecha del snapshot activo.
 
-## 8. Exclusión de perfiles identificados manualmente (ADR-0006)
+## 8. Exclusión de perfiles identificados (ADR-0006)
 
-- `UnavailableProfile` guarda un `username` normalizado y una nota opcional en el registro local por cuenta.
-- `withoutUnavailableProfiles(snapshot, usernames)` devuelve una vista derivada que excluye los nombres del conjunto de `followers` y `following`; nunca modifica el snapshot original.
-- Para estadísticas filtradas, se aplica el mismo conjunto de exclusión a cada snapshot antes de llamar `analyze`. Las diferencias históricas se recalculan desde esos conjuntos filtrados y no restando cantidades.
-- El checkbox está desactivado al abrir el dashboard. Las marcas son ingresadas por el usuario y no confirman automáticamente desactivaciones, suspensiones ni disponibilidad del perfil.
+- Un perfil local guarda el username, motivo, origen (automático o manual) y decisión de exclusión. Las clasificaciones anteriores sin origen se leen como manuales.
+- El importador reconoce el patrón explícito __deleted__ en usernames extraídos de listas JSON o HTML. Devuelve estas detecciones por separado; no cambia las listas del snapshot.
+- Las marcas manuales y correcciones se conservan frente a detecciones automáticas posteriores. Corregir una detección crea una decisión manual de inclusión persistente.
+- La vista derivada filtra seguidores y seguidos antes de recalcular relaciones e historial, sin modificar los snapshots. El checkbox está desactivado inicialmente y el marcador explícito no demuestra una condición que no figure en la exportación.
