@@ -306,7 +306,7 @@ test('imports a synthetic JSON ZIP through the UI and shows dashboard relationsh
   await assertBrowserPrivacy(signals);
 });
 
-test('detects deleted-account markers, filters them, and preserves a manual correction', async ({
+test('automatically excludes explicit deleted markers and preserves an opt-in correction', async ({
   page,
 }) => {
   const signals = monitorBrowser(page);
@@ -324,44 +324,35 @@ test('detects deleted-account markers, filters them, and preserves a manual corr
   await submitImport(dialog);
   await expect(dialog).toBeHidden();
   await expect(successNotice(page)).toContainText(
-    'FollowLens detectó 1 marcador explícito de cuenta eliminada.',
+    '2 perfiles únicos; 1 con marcador explícito excluidos y 1 sin confirmación conservados.',
   );
 
   const summary = page.getByRole('region', { name: 'Resumen de relaciones' });
   const list = page.getByRole('region', { name: 'Listado de cuentas' });
-  const exclusion = page.getByRole('checkbox', {
-    name: 'Excluir perfiles identificados como no disponibles',
-  });
-  await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('2');
-  await expect(summary.getByRole('button').nth(1).locator('strong')).toHaveText('2');
-  await expect(exclusion).not.toBeChecked();
-
-  await summary.getByRole('button').nth(0).click();
-  await expect(list.getByText('@__deleted__synthetic', { exact: true })).toBeVisible();
-  await exclusion.check();
   await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('1');
   await expect(summary.getByRole('button').nth(1).locator('strong')).toHaveText('1');
-  await expect(list.getByText('@__deleted__synthetic', { exact: true })).toHaveCount(0);
-  await exclusion.uncheck();
-  await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('2');
 
-  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
+  await summary.getByRole('button').nth(0).click();
+  await expect(list.getByText('@__deleted__synthetic', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Revisar exclusiones' }).click();
   const availabilityDialog = page.getByRole('dialog', {
-    name: 'Perfiles identificados como no disponibles',
+    name: 'Marcadores explícitos de cuentas eliminadas',
   });
   const markerRow = availabilityDialog
     .locator('.availability-row')
     .filter({ hasText: deletedMarker });
-  await expect(markerRow.getByText('Detectado por FollowLens')).toBeVisible();
-  await expect(
-    markerRow.getByLabel('Motivo de la marca para __deleted__synthetic'),
-  ).toHaveValue('Marcador de cuenta eliminada en la exportación');
+  await expect(markerRow.getByText('Detectado automáticamente')).toBeVisible();
   await markerRow
-    .getByRole('button', { name: 'Incluir __deleted__synthetic en el análisis' })
+    .getByRole('button', {
+      name: `Incluir ${deletedMarker} en el análisis`,
+    })
     .click();
-  await expect(markerRow.getByText('Identificado por vos')).toBeVisible();
-  await expect(markerRow.getByText(/Corregido por vos/)).toBeVisible();
+  await expect(markerRow.getByText(/Corregido para conservarlo/)).toBeVisible();
   await availabilityDialog.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(summary.getByRole('button').nth(0).locator('strong')).toHaveText('2');
+  await expect(summary.getByRole('button').nth(1).locator('strong')).toHaveText('2');
+  await expect(list.getByText('@__deleted__synthetic', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Importar datos' }).click();
   const secondDialog = page.getByRole('dialog', { name: 'Una nueva perspectiva' });
@@ -373,23 +364,20 @@ test('detects deleted-account markers, filters them, and preserves a manual corr
       'application/zip',
     ),
     'deleted-marker-again.zip',
-    '2020-01-03',
+      '2026-10-03',
   );
   await submitImport(secondDialog);
   await expect(secondDialog).toBeHidden();
 
-  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
+  await page.getByRole('button', { name: 'Revisar exclusiones' }).click();
   const correctedDialog = page.getByRole('dialog', {
-    name: 'Perfiles identificados como no disponibles',
+    name: 'Marcadores explícitos de cuentas eliminadas',
   });
   const correctedRow = correctedDialog
     .locator('.availability-row')
     .filter({ hasText: deletedMarker });
-  await expect(correctedRow.getByText('Identificado por vos')).toBeVisible();
-  await expect(correctedRow.getByText(/Corregido por vos/)).toBeVisible();
+  await expect(correctedRow.getByText(/Corregido para conservarlo/)).toBeVisible();
   await correctedDialog.getByRole('button', { name: 'Cerrar' }).click();
-  await expect(exclusion).not.toBeChecked();
-  await expect(exclusion).toBeDisabled();
   await assertBrowserPrivacy(signals);
 });
 
@@ -563,7 +551,7 @@ test('reports corrupted ZIPs without partial results and allows retry', async ({
   await assertBrowserPrivacy(signals);
 });
 
-test('manually marked profiles filter dashboard metrics, history, and CSV consistently', async ({
+test('keeps every unconfirmed profile in dashboard metrics, history, and CSV', async ({
   page,
 }) => {
   const signals = monitorBrowser(page);
@@ -572,7 +560,7 @@ test('manually marked profiles filter dashboard metrics, history, and CSV consis
     firstDialog,
     filePayload(
       'availability-before.zip',
-      jsonZip(['ana', 'suspended', 'oldmutual'], ['suspended', 'oldmutual']),
+      jsonZip(['ana', 'oldmutual', '__deleted__gone'], ['suspended', 'oldmutual']),
       'application/zip',
     ),
     'availability-before.zip',
@@ -588,7 +576,7 @@ test('manually marked profiles filter dashboard metrics, history, and CSV consis
     secondDialog,
     filePayload(
       'availability-after.zip',
-      jsonZip(['ana', 'oldmutual', 'newfriend'], ['suspended', 'oldmutual', 'newfriend']),
+      jsonZip(['ana', 'newfriend', '__deleted__gone'], ['suspended', 'newfriend']),
       'application/zip',
     ),
     'availability-after.zip',
@@ -599,58 +587,24 @@ test('manually marked profiles filter dashboard metrics, history, and CSV consis
   await expect(secondDialog).toBeHidden();
 
   const statCards = page.locator('.stat-grid .stat-card');
-  await expect(statCards.nth(0).locator('strong')).toHaveText('3');
+  await expect(statCards.nth(0).locator('strong')).toHaveText('2');
+  await expect(statCards.nth(1).locator('strong')).toHaveText('2');
+  await expect(page.getByLabel('Auditoría automática de disponibilidad'))
+    .toContainText('4 perfiles revisados · 1 marcadores explícitos excluidos · 3 sin confirmar conservados');
   await expect(page.getByText('1 seguidores ya no aparecen')).toBeVisible();
   const results = page.locator('.people-table');
   await expect(results.getByText('@suspended')).toBeVisible();
-
-  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
-  const availabilityDialog = page.getByRole('dialog', {
-    name: 'Perfiles identificados como no disponibles',
-  });
-  await availabilityDialog
-    .getByLabel('Agregar nombres de usuario')
-    .fill('@suspended');
-  await availabilityDialog
-    .getByLabel('Motivo (opcional, para todos los nombres que agregues)')
-    .fill('Cuenta suspendida');
-  await availabilityDialog.getByRole('button', { name: 'Agregar a la lista' }).click();
-  await expect(
-    availabilityDialog.getByLabel('Motivo de la marca para suspended'),
-  ).toHaveValue('Cuenta suspendida');
-  await availabilityDialog.getByRole('button', { name: 'Cerrar' }).click();
-
-  const exclusion = page.getByRole('checkbox', {
-    name: 'Excluir perfiles identificados como no disponibles',
-  });
-  await expect(exclusion).not.toBeChecked();
-  await exclusion.check();
-  await expect(statCards.nth(1).locator('strong')).toHaveText('2');
-  await expect(page.getByText('0 seguidores ya no aparecen')).toBeVisible();
-  await expect(results.getByText('@suspended')).toHaveCount(0);
-
   await page.getByLabel('Filtrar relaciones').click();
   await page.getByRole('option', { name: /Seguidos · 2/ }).click();
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Exportar CSV' }).click();
   const download = await downloadPromise;
   const csv = await readFile((await download.path())!, 'utf8');
-  expect(csv).not.toContain('suspended');
-
-  await exclusion.uncheck();
-  await expect(statCards.nth(1).locator('strong')).toHaveText('3');
+  expect(csv).toContain('suspended');
+  expect(csv).not.toContain('__deleted__gone');
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Tus relaciones.' })).toBeVisible();
-  await expect(
-    page.getByRole('checkbox', {
-      name: 'Excluir perfiles identificados como no disponibles',
-    }),
-  ).not.toBeChecked();
-  await page.getByRole('button', { name: 'Gestionar perfiles' }).click();
-  await expect(
-    page
-      .getByRole('dialog', { name: 'Perfiles identificados como no disponibles' })
-      .getByText('@suspended'),
-  ).toBeVisible();
+  await expect(page.locator('.stat-grid .stat-card').nth(1).locator('strong')).toHaveText('2');
+  await expect(page.locator('.people-table').getByText('@suspended')).toBeVisible();
   await assertBrowserPrivacy(signals);
 });

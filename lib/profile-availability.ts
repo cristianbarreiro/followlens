@@ -1,5 +1,4 @@
 import {
-  normalize,
   normalizeDeletedAccountMarker,
   type Snapshot,
 } from './relationships.ts';
@@ -14,20 +13,41 @@ export type UnavailableProfile = {
 export const DELETED_ACCOUNT_MARKER_REASON =
   'Marcador de cuenta eliminada en la exportación';
 
-export function parseUnavailableUsernames(input: string) {
-  const usernames = new Set<string>();
-  const invalid: string[] = [];
-  for (const token of input.split(/[\s,;]+/).filter(Boolean)) {
-    const username = normalize(token);
-    if (username) usernames.add(username);
-    else invalid.push(token);
-  }
-  return { usernames: [...usernames].sort(), invalid };
+export type ProfileAvailabilityAudit = {
+  auditedCount: number;
+  confirmedDeletedUsernames: string[];
+  unconfirmedCount: number;
+};
+
+/** Audits every unique relationship username using export evidence only. */
+export function auditProfileAvailability(
+  followers: string[],
+  following: string[],
+): ProfileAvailabilityAudit {
+  const seen = new Set<string>();
+  const confirmedDeletedUsernames: string[] = [];
+  const auditList = (usernames: string[]) => {
+    for (const username of usernames) {
+      if (seen.has(username)) continue;
+      seen.add(username);
+      if (normalizeDeletedAccountMarker(username))
+        confirmedDeletedUsernames.push(username);
+    }
+  };
+  auditList(followers);
+  auditList(following);
+  return {
+    auditedCount: seen.size,
+    confirmedDeletedUsernames,
+    unconfirmedCount: seen.size - confirmedDeletedUsernames.length,
+  };
 }
 
 export function isUnavailableProfileExcluded(profile: UnavailableProfile) {
-  // Older IndexedDB records predate isExcluded and remain active classifications.
-  return profile.isExcluded !== false;
+  return (
+    normalizeDeletedAccountMarker(profile.username) !== null &&
+    profile.isExcluded !== false
+  );
 }
 
 export function excludedUnavailableProfiles(
@@ -41,23 +61,32 @@ export function mergeDetectedUnavailableProfiles(
   detectedUsernames: string[],
 ): UnavailableProfile[] {
   const profiles = new Map(
-    existing.map((profile) => [
-      profile.username,
-      {
-        ...profile,
-        source: profile.source ?? 'manual',
-        isExcluded: profile.isExcluded ?? true,
-      } satisfies UnavailableProfile,
-    ]),
+    existing
+      .filter((profile) => normalizeDeletedAccountMarker(profile.username))
+      .map((profile) => [
+        profile.username,
+        {
+          ...profile,
+          source: 'automatic',
+          isExcluded: profile.isExcluded ?? true,
+        } satisfies UnavailableProfile,
+      ]),
   );
 
   for (const candidate of detectedUsernames) {
     const username = normalizeDeletedAccountMarker(candidate);
     if (!username) continue;
     const current = profiles.get(username);
-    // A manual mark or correction is the user's decision and wins on later imports.
-    if (current?.source === 'manual') continue;
+    // Preserve an explicit correction that keeps a detected marker included.
+    if (current && current.isExcluded === false) continue;
     if (!current)
+      profiles.set(username, {
+        username,
+        reason: DELETED_ACCOUNT_MARKER_REASON,
+        source: 'automatic',
+        isExcluded: true,
+      });
+    else
       profiles.set(username, {
         username,
         reason: DELETED_ACCOUNT_MARKER_REASON,

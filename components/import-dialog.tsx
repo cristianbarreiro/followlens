@@ -54,6 +54,11 @@ export function ImportDialog({
     persist: boolean,
     analysis?: Record<Group, string[]>,
     detectedUnavailableProfiles?: string[],
+    availabilityAudit?: {
+      auditedCount: number;
+      confirmedDeletedUsernames: string[];
+      unconfirmedCount: number;
+    },
   ) => Promise<void>;
   account: string;
   processFiles?: ImportPipeline;
@@ -148,6 +153,7 @@ export function ImportDialog({
         persist,
         processed.analysis,
         processed.imported.detectedUnavailableProfiles,
+        processed.imported.availabilityAudit,
       );
       onOpenChange(false);
     } catch (err) {

@@ -80,7 +80,9 @@ Para evitar bloqueos o consumos de memoria incontrolados, el código aplica lím
 - **Aislamiento de Origen:** Los datos guardados pertenecen exclusivamente al origen web (`origin`) del navegador y no se comparten entre navegadores ni perfiles.
 - **Eliminación:** La interfaz permite al usuario eliminar snapshots individuales y quitar marcas de disponibilidad. Borrar los datos de navegación elimina la base por completo.
 
-El registro de disponibilidad se guarda localmente por cuenta. FollowLens reconoce únicamente el marcador explícito __deleted__ que aparezca en las listas de la exportación; esa detección no prueba la condición actual del perfil. El usuario también puede agregar perfiles y corregir detecciones, y esas decisiones manuales prevalecen en futuras importaciones. No se hacen peticiones, scraping ni consultas a proveedores para inferir estados sin señal explícita. Ver ADR-0006.
+El registro de disponibilidad se guarda localmente por cuenta. En cada importación FollowLens inspecciona todos los usernames únicos de seguidores y seguidos. Solo un marcador explícito `__deleted__` se excluye automáticamente; los perfiles sin ese marcador se conservan como no confirmados. La corrección manual solo permite volver a incluir un marcador detectado. No se hacen peticiones, scraping ni consultas a proveedores para inferir estados. Ver ADR-0006.
+
+La [API oficial de Instagram](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api) está enfocada en cuentas profesionales y acceso autorizado, y no ofrece un endpoint general para confirmar el estado de todos los seguidores y seguidos de una cuenta personal. Meta explica que recopilar datos mediante automatización requiere su permiso ([política de recopilación automatizada](https://about.fb.com/news/2021/04/how-we-combat-scraping/)). Una cuenta propia de FollowLens no resolvería esa limitación; automatizar visitas a perfiles expondría las listas de relaciones y podría contravenir las reglas de Meta. Por eso la aplicación no usa una cuenta verificadora ni automatiza acceso a Instagram.
 
 ---
 
@@ -100,6 +102,6 @@ El registro de disponibilidad se guarda localmente por cuenta. FollowLens recono
 
 ## 7. Integridad de los Datos y Riesgos Inherentes
 
-- **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre exportaciones, el análisis puede mostrar una cuenta perdida y otra nueva, sin distinguir la causa. El marcador __deleted__ sí se clasifica al importar; otros estados sin marcador solo pueden agregarse o corregirse manualmente. El filtro no altera los snapshots.
+- **Cuentas Desactivadas o Renombradas:** Si un usuario cambia de username o desactiva su cuenta entre exportaciones, el análisis puede mostrar una cuenta perdida y otra nueva, sin distinguir la causa. Solo se excluye el marcador `__deleted__` cuando aparece explícitamente en el archivo. Un perfil privado, renombrado, bloqueado o temporalmente inaccesible permanece en el análisis; FollowLens no puede confirmar esos estados sin una señal explícita.
 - **Exportaciones Incompletas:** Si faltan partes de `followers_*.json`, la importación se rechaza para evitar generar falsos positivos de unfollow.
 - **Observación Discreta:** Las fechas corresponden al día de la exportación, no al momento exacto en que ocurrió la acción en la red social.

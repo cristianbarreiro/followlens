@@ -140,9 +140,9 @@ Genera un archivo CSV con codificación UTF-8 con BOM (`\uFEFF`) y columnas esta
 5. `ultima_observacion`: fecha más reciente en que se observó al usuario en el historial.
 6. `fecha_exportacion`: fecha del snapshot activo.
 
-## 8. Exclusión de perfiles identificados (ADR-0006)
+## 8. Auditoría automática de disponibilidad (ADR-0006)
 
-- Un perfil local guarda el username, motivo, origen (automático o manual) y decisión de exclusión. Las clasificaciones anteriores sin origen se leen como manuales.
-- El importador reconoce el patrón explícito __deleted__ en usernames extraídos de listas JSON o HTML. Devuelve estas detecciones por separado; no cambia las listas del snapshot.
-- Las marcas manuales y correcciones se conservan frente a detecciones automáticas posteriores. Corregir una detección crea una decisión manual de inclusión persistente.
-- La vista derivada filtra seguidores y seguidos antes de recalcular relaciones e historial, sin modificar los snapshots. El checkbox está desactivado inicialmente y el marcador explícito no demuestra una condición que no figure en la exportación.
+- En cada importación, `auditProfileAvailability()` recorre todos los usernames únicos de seguidores y seguidos y devuelve cantidades de revisados, confirmados por marcador explícito y sin confirmación.
+- `__deleted__` es la única evidencia automática aceptada y se excluye de forma predeterminada al derivar métricas actuales e históricas. Los perfiles ordinarios, incluidos casos ambiguos, se conservan.
+- La corrección opcional se limita a reincluir un marcador detectado. Las marcas manuales antiguas de cuentas ordinarias no se usan para excluirlas.
+- El filtrado es inmutable y no modifica snapshots. No se consulta Instagram ni se transmiten usernames; la exportación local es la única fuente de evidencia.

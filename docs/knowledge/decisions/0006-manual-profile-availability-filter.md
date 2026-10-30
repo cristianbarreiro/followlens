@@ -1,44 +1,45 @@
 ---
 okf_version: "0.2"
 type: Decision
-title: ADR-0006 - Registro híbrido de perfiles no disponibles
-description: Detección local de marcadores explícitos, decisiones manuales y filtro estadístico derivado sin alterar snapshots ni consultar servicios externos.
+title: ADR-0006 - Auditoría automática local de disponibilidad
+description: Auditoría de todos los perfiles importados, exclusión conservadora de marcadores explícitos y conservación de estados no confirmados.
 tags: [decision, adr, availability, privacy, snapshots, importer]
 timestamp: "2026-10-21T23:00:00-03:00"
 lifecycle: stable
 ---
 
-# ADR-0006: Registro híbrido local de perfiles no disponibles
+# ADR-0006: Auditoría automática local de disponibilidad
 
 ## Estado
 
-Aceptado e implementado.
+Aceptado e implementado. Reemplaza el flujo manual introducido inicialmente.
 
 ## Contexto
 
-Las exportaciones oficiales describen relaciones observadas en una fecha; no informan de manera fiable si otra cuenta fue desactivada, suspendida, eliminada, renombrada o dejó de ser visible. FollowLens tampoco consulta perfiles, usa scraping ni recibe datos de una API de Instagram. Una desaparición de una exportación no demuestra una causa.
+Las exportaciones oficiales describen relaciones observadas en una fecha; fuera de los marcadores explícitos, no informan de manera fiable si otra cuenta fue desactivada, suspendida, eliminada, renombrada o dejó de ser visible. Los fallos de carga de una página tampoco distinguen estas causas de una restricción temporal, privacidad, bloqueo o cambio de usuario.
 
 ## Decisión
 
-1. Durante una importación, FollowLens identifica los valores normalizados con el prefijo explícito __deleted__ en las listas JSON y HTML. Solo se usa esta señal comprobable del archivo; no se deduce el estado de cuentas que no tengan un marcador.
-2. El registro se guarda en IndexedDB local, separado de `snapshots`, y organizado por la cuenta analizada. La base `followlens-local` se actualiza de forma aditiva a la versión 2; las capturas existentes permanecen intactas.
-3. Las detecciones automáticas se agregan con origen FollowLens y motivo «Marcador de cuenta eliminada en la exportación». El usuario puede agregar perfiles, cambiar motivos, incluir una detección corregida o quitar una clasificación. Una corrección manual prevalece en futuras importaciones.
-4. El checkbox global comienza desactivado. Al activarlo, se aplica el mismo conjunto de exclusión a seguidores y seguidos de cada snapshot y se recalculan las relaciones históricas, métricas, tendencia, listas, detalle y CSV. La importación y su snapshot original no se modifican.
-5. El registro, parsing, cálculos y persistencia permanecen en el navegador. No se llama a Instagram, Unavatar ni a otro proveedor; no se incorpora scraping ni fotografía de perfil.
+1. Durante cada importación, `auditProfileAvailability()` recorre cada username único de seguidores y seguidos, y clasifica como confirmado exclusivamente el marcador explícito `__deleted__`. El resto queda como no confirmado.
+2. FollowLens excluye automáticamente esos marcadores de estadísticas y comparaciones históricas. No exige seleccionar perfiles; una corrección opcional solo puede volver a incluir una detección explícita.
+3. El registro de marcadores y correcciones de inclusión se guarda en IndexedDB local, separado de `snapshots`, y organizado por la cuenta analizada. Las importaciones históricas se filtran sin modificar los snapshots originales.
+4. Los marcadores manuales antiguos de perfiles ordinarios dejan de participar en exclusiones. Los datos de snapshots y el esquema IndexedDB se mantienen intactos.
+5. El análisis, la persistencia y los estados permanecen en el navegador. No se consulta Instagram, no se usa scraping, no se recopilan credenciales y no se transmiten listas.
+6. No se implementa una cuenta de Instagram de FollowLens: la [API oficial](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api) sirve a cuentas profesionales autorizadas y no permite confirmar universalmente perfiles personales de seguidores o seguidos. Business Discovery también se limita a perfiles profesionales. [Meta indica](https://about.fb.com/news/2021/04/how-we-combat-scraping/) que la recopilación automatizada requiere su permiso; automatizar solicitudes web desde una cuenta propia no es una alternativa autorizada ni fiable.
 
 ## Privacidad
 
-Las detecciones y decisiones del usuario se guardan únicamente en IndexedDB local por cuenta y nunca se transmiten. La etiqueta Detectado por FollowLens describe la presencia literal del marcador en la exportación; no confirma la condición actual de una cuenta.
+El conteo de auditoría, las detecciones y las correcciones se procesan y guardan únicamente en IndexedDB local por cuenta y nunca se transmiten. `__deleted__` confirma la señal de eliminación presente en el archivo, no que el estado siga vigente al día de hoy.
 
 ## Limitaciones
 
-- FollowLens solo reconoce el patrón explícito __deleted__ implementado en el importador. El formato puede variar entre exportaciones.
-- Un marcador no prueba por sí solo si el perfil continúa eliminado. Sin un identificador explícito en el ZIP, no se puede determinar si una cuenta está suspendida, temporalmente desactivada, restringida, privada o renombrada.
-- El filtro es específico de la cuenta de Instagram analizada y no cambia las exportaciones originales.
-- Una detección puede quedar desactualizada; el usuario puede corregirla. Las correcciones manuales se conservan al reimportar el mismo username.
+- FollowLens solo reconoce el patrón explícito `__deleted__`; si Instagram cambia el formato de exportación, la señal podría no aparecer.
+- No hay confirmación en vivo de cuentas desactivadas o suspendidas si la exportación no trae el marcador. Esas cuentas permanecen en el análisis como no confirmadas.
+- Los fallos transitorios de Instagram no se solicitan ni se interpretan; como no se hacen consultas de red, no hay errores remotos que clasificar.
+- La corrección de un marcador se limita a incluirlo otra vez y se conserva al reimportar el mismo valor.
 
 ## Consecuencias
 
-- El usuario puede revisar métricas sin cuentas que haya identificado como no disponibles y volver a la vista original desmarcando una opción.
-- Las métricas excluidas son reproducibles a partir de snapshots sin modificar y del registro local vigente.
+- El usuario ve un resumen del total revisado, las señales explícitas y los perfiles que permanecen sin confirmar.
+- Las métricas se recalculan automáticamente a partir de los snapshots sin modificar y del registro local por cuenta.
 - Cambiar de navegador o borrar sus datos locales elimina las marcas persistidas.

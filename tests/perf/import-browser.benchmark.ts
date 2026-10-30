@@ -1265,6 +1265,11 @@ test('compares the current importer with the direct-set parser prototype', async
         following: string[];
         fileCount: number;
         detectedUnavailableProfiles: string[];
+        availabilityAudit: {
+          auditedCount: number;
+          confirmedDeletedUsernames: string[];
+          unconfirmedCount: number;
+        };
       };
       type Measurement = {
         stage: string;
@@ -1380,6 +1385,11 @@ test('compares the current importer with the direct-set parser prototype', async
           following: [],
           fileCount: 0,
           detectedUnavailableProfiles: [],
+          availabilityAudit: {
+            auditedCount: 0,
+            confirmedDeletedUsernames: [],
+            unconfirmedCount: 0,
+          },
         };
         const names = {
           followers: new Set<string>(),
@@ -1437,6 +1447,19 @@ test('compares the current importer with the direct-set parser prototype', async
         imported.followers = [...names.followers].sort();
         imported.following = [...names.following].sort();
         imported.fileCount = Object.keys(entries).length;
+        const auditedNames = new Set([
+          ...imported.followers,
+          ...imported.following,
+        ]);
+        const confirmedDeletedUsernames = [...auditedNames]
+          .filter((name) => /^__deleted__.+$/.test(name))
+          .sort();
+        imported.detectedUnavailableProfiles = confirmedDeletedUsernames;
+        imported.availabilityAudit = {
+          auditedCount: auditedNames.size,
+          confirmedDeletedUsernames,
+          unconfirmedCount: auditedNames.size - confirmedDeletedUsernames.length,
+        };
         stages.push({
           stage: 'direct-set-result-finalization',
           durationMs: performance.now() - finalizeStartedAt,
@@ -1956,6 +1979,11 @@ test('benchmarks importer worker responsiveness against main-thread import', asy
           following: string[];
           fileCount: number;
           detectedUnavailableProfiles: string[];
+          availabilityAudit: {
+            auditedCount: number;
+            confirmedDeletedUsernames: string[];
+            unconfirmedCount: number;
+          };
         };
         type WorkerSuccess = {
           operationId: string;
@@ -2597,6 +2625,11 @@ test('benchmarks end-to-end Worker import, analysis, React dashboard responsiven
         following: string[];
         fileCount: number;
         detectedUnavailableProfiles: string[];
+        availabilityAudit: {
+          auditedCount: number;
+          confirmedDeletedUsernames: string[];
+          unconfirmedCount: number;
+        };
       };
       analysis?: Record<Group, string[]>;
       importMs: number;

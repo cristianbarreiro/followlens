@@ -49,7 +49,7 @@ lib/
 ├── zip.ts                       ── Lector ZIP selectivo por rangos (EOCD, CD, CRC32, streaming DEFLATE acotado)
 ├── relationships.ts             ── Lógica pura de conjuntos, normalización de usernames, timeline y CSV
 ├── storage.ts                   ── Adaptador de persistencia local en IndexedDB (base 'followlens-local')
-├── profile-availability.ts      ── Registro híbrido de marcadores detectados y marcas manuales; filtrado inmutable de snapshots
+├── profile-availability.ts      ── Auditoría local de todos los usernames; exclusión conservadora de marcadores explícitos
 ├── demo.ts                      ── Generador de snapshots sintéticos para exploración sin archivos
 ├── utils.ts                     ── Utilidades de concatenación de clases Tailwind (cn)
 └── relationships.test.ts        ── Pruebas unitarias de parsing (JSON/HTML), normalización, análisis e importación
@@ -122,12 +122,12 @@ La evolución arquitectónica separa el pipeline de importación en cuatro capas
 - **Desacoplamiento de análisis y visualización:** La lógica de análisis relacional (`lib/relationships.ts`) y la extracción de datos (`lib/importer.ts`) deben mantenerse estrictamente desacopladas de cualquier enriquecimiento fotográfico o visual futuro.
 - **Persistencia sin caché fotográfica:** La base de IndexedDB incluye el almacén de snapshots y el registro local de disponibilidad definido en ADR-0006. No existe almacén de caché de fotografías.
 
-### Disponibilidad identificada en la exportación y por el usuario (ADR-0006)
+### Auditoría automática de disponibilidad (ADR-0006)
 
-- El importador reconoce el prefijo explícito __deleted__ en listas JSON y HTML y devuelve esos valores en una lista de detecciones separada; los snapshots conservan sus listas originales.
-- El registro combina detecciones explícitas con marcas manuales y correcciones; conserva origen, motivo y decisión de exclusión, y respeta las decisiones manuales en importaciones posteriores.
-- El usuario puede agregar o quitar perfiles, cambiar motivos y corregir detecciones. El registro se conserva en IndexedDB, separado de las capturas y agrupado por cuenta.
-- El checkbox global está desactivado de forma predeterminada y recalcula seguidores, seguidos, tendencias, comparaciones, detalle e informes CSV a partir de conjuntos filtrados. Solo se reconoce el marcador explícito; no se infieren estados sin esa señal ni se usan Instagram, scraping, proveedores o fotografías.
+- Cada importación revisa todos los usernames únicos de seguidores y seguidos. El patrón explícito `__deleted__` se registra como evidencia de eliminación presente en la exportación; los demás perfiles quedan como no confirmados y se conservan.
+- Solo los marcadores explícitos se excluyen por defecto de las métricas actuales e históricas. La corrección opcional de una detección puede volver a incluir ese marcador; no se pueden marcar cuentas ordinarias como eliminadas.
+- El resumen de auditoría muestra cuántos perfiles se revisaron, cuántos tuvieron marcador explícito y cuántos quedaron sin confirmación. Los resultados y correcciones siguen en IndexedDB local por cuenta, sin modificar los snapshots originales.
+- La auditoría no realiza solicitudes de red. La API oficial de Instagram se limita a cuentas profesionales autorizadas y no ofrece verificación general de toda cuenta de seguidores/seguidos; las consultas automatizadas a páginas de perfiles no se implementan. Ver ADR-0006.
 
 ---
 

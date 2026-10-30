@@ -3,11 +3,11 @@ import {
   fileInfo,
   fileKind,
   parseRelationships,
-  normalizeDeletedAccountMarker,
   selectZipRelationshipPaths,
   type FileFormat,
 } from './relationships.ts';
 import { parseHtmlRelationships } from './html-parser.ts';
+import { auditProfileAvailability } from './profile-availability.ts';
 import {
   readZipSelective,
   MAX_JSON_TOTAL,
@@ -22,6 +22,7 @@ export async function importFiles(
   following: string[];
   fileCount: number;
   detectedUnavailableProfiles: string[];
+  availabilityAudit: ReturnType<typeof auditProfileAvailability>;
 }> {
   const importStartedAt = diagnostics ? performance.now() : 0;
   if (!files.length)
@@ -160,17 +161,15 @@ export async function importFiles(
   const finalizeStart = diagnostics ? performance.now() : 0;
   const followers = [...names.followers].sort();
   const following = [...names.following].sort();
-  const detectedUnavailableProfiles = [
-    ...new Set([...followers, ...following].flatMap((name) => {
-      const marker = normalizeDeletedAccountMarker(name);
-      return marker ? [marker] : [];
-    })),
-  ].sort();
+  const availabilityAudit = auditProfileAvailability(followers, following);
+  const detectedUnavailableProfiles =
+    availabilityAudit.confirmedDeletedUsernames.sort();
   const result = {
     followers,
     following,
     fileCount: Object.keys(entries).length,
     detectedUnavailableProfiles,
+    availabilityAudit,
   };
   if (diagnostics) {
     diagnostics({
@@ -181,6 +180,7 @@ export async function importFiles(
         following: result.following.length,
         fileCount: result.fileCount,
         detectedUnavailableProfiles: result.detectedUnavailableProfiles.length,
+        auditedProfiles: result.availabilityAudit.auditedCount,
       },
     });
     diagnostics({
@@ -191,6 +191,7 @@ export async function importFiles(
         following: result.following.length,
         fileCount: result.fileCount,
         detectedUnavailableProfiles: result.detectedUnavailableProfiles.length,
+        auditedProfiles: result.availabilityAudit.auditedCount,
       },
     });
   }

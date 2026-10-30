@@ -8,7 +8,7 @@ Analizador de relaciones de Instagram. React 19 + TypeScript sobre Vite y Vinext
 
 - **Mapeo de Relaciones:** Seguidores, seguidos, mutuos y relaciones no recíprocas (cuentas que no te siguen y cuentas a las que no seguís de vuelta).
 - **Análisis Temporal entre Exportaciones:** Seguidores ganados o perdidos, seguimientos nuevos o descartados y evolución de conexiones mutuas entre snapshots fechados de una misma cuenta.
-- **Filtro de perfiles no disponibles:** FollowLens detecta el marcador explícito __deleted__ en las exportaciones y permite agregar o corregir perfiles manualmente. El checkbox recalcula estadísticas, tendencias, comparaciones históricas y CSV. Las marcas se guardan localmente; no comprueban suspensiones o desactivaciones sin un marcador.
+- **Auditoría automática de disponibilidad:** En cada importación revisa todos los perfiles de seguidores y seguidos usando únicamente la exportación local. Excluye de las métricas los marcadores explícitos `__deleted__`; las cuentas sin confirmación se conservan. No consulta Instagram, no recopila datos en red y no requiere seleccionar perfiles manualmente.
 - **Filtros Específicos:** Exploración focalizada en no reciprocidad, seguidores perdidos que todavía seguís, mutuos perdidos y nuevas conexiones.
 - **Exploración y Exportación:** Búsqueda interactiva, filtros por grupo, paginación, línea temporal (*timeline*) por cuenta y exportación a CSV con codificación UTF-8 segura (BOM).
 - **Historial Local Opcional:** Persistencia voluntaria en IndexedDB (`followlens-local`) por cuenta, con eliminación granular de snapshots y control total por parte del usuario.
@@ -43,7 +43,9 @@ Analizador de relaciones de Instagram. React 19 + TypeScript sobre Vite y Vinext
 3. **Completar datos de la cuenta:** Indicar el nombre de usuario de la cuenta y la fecha correspondiente a la exportación para identificar el snapshot.
 4. *(Opcional)* **Guardar en historial local:** Activar la casilla para conservar la importación en IndexedDB si se desean realizar comparaciones históricas futuras con nuevas exportaciones.
 5. **Explorar y comparar:** Analizar los grupos de relaciones, filtrar y buscar usuarios o exportar a CSV. Al importar una segunda exportación más reciente de la misma cuenta, la aplicación mostrará automáticamente la evolución y los cambios temporales.
-6. **Excluir perfiles identificados (opcional):** FollowLens marca automáticamente los valores que comienzan con __deleted__ en las listas importadas. Desde la gestión local también podés agregar perfiles, cambiar el motivo o corregir una detección para volver a incluirla. Activá el checkbox para recalcular todas las fechas seleccionadas con las mismas cuentas excluidas. No se modifica el snapshot original ni se consulta Instagram.
+6. **Revisión automática de disponibilidad:** En cada importación FollowLens recorre todos los perfiles únicos de seguidores y seguidos. Los marcadores explícitos `__deleted__` se excluyen automáticamente de las métricas históricas; los demás perfiles quedan incluidos porque un error, una cuenta privada o un cambio de usuario no confirma que se haya eliminado. No tenés que seleccionar cuentas.
+
+La comprobación se limita a señales presentes en el archivo exportado: no existe una consulta oficial general para confirmar cualquier seguidor o seguido. La API de Instagram está orientada a cuentas profesionales autorizadas y solo ofrece datos acotados sobre otros perfiles profesionales; automatizar consultas a la web de Instagram desde una cuenta propia no es una alternativa aprobada ni fiable. FollowLens no consulta Instagram, no recopila relaciones por red y no recibe credenciales.
 
 ---
 
@@ -93,7 +95,7 @@ npm run benchmark:importer:crc32
 npm run profile:importer:browser
 ```
 
-- **Pruebas (`npm test`):** 45 tests unitarios nativos que cubren importación HTML/JSON, detección del marcador explícito __deleted__, correcciones manuales, extracción ZIP y álgebra relacional.
+- **Pruebas (`npm test`):** Suite unitaria nativa que cubre importación HTML/JSON, auditoría de todas las relaciones, conservación de cuentas no confirmadas, detección del marcador explícito `__deleted__`, extracción ZIP y álgebra relacional.
 - **Tipos (`npm run typecheck`):** Validación TypeScript sin errores (`tsc --noEmit`).
 - **Compilación (`npm run build`):** Generación limpia de bundles para producción con Vinext (Vite 8).
 - **Rendimiento (`npm run benchmark:importer`):** Escenarios sintéticos opt-in; informa tiempos y snapshots aproximados sin umbrales de CI.

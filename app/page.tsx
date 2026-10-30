@@ -63,6 +63,7 @@ import {
   analyze,
   csvRows,
   labels,
+  normalizeDeletedAccountMarker,
   relationship,
   timeline,
   type Group,
@@ -76,10 +77,10 @@ import {
   deleteSnapshot,
 } from '@/lib/storage';
 import {
+  auditProfileAvailability,
   excludedUnavailableProfiles as getExcludedUnavailableProfiles,
   isUnavailableProfileExcluded,
   mergeDetectedUnavailableProfiles,
-  parseUnavailableUsernames,
   withoutUnavailableProfiles,
   type UnavailableProfile,
 } from '@/lib/profile-availability';
@@ -321,11 +322,7 @@ export default function Home() {
     [busy, setBusy] = useState(false),
     [unavailableProfiles, setUnavailableProfiles] = useState<UnavailableProfile[]>([]),
     [availabilityAccount, setAvailabilityAccount] = useState(''),
-    [excludeUnavailableFor, setExcludeUnavailableFor] = useState(''),
     [availabilityOpen, setAvailabilityOpen] = useState(false),
-    [availabilityInput, setAvailabilityInput] = useState(''),
-    [availabilityReason, setAvailabilityReason] = useState(''),
-    [availabilityError, setAvailabilityError] = useState(''),
     [availabilityBusy, setAvailabilityBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState('');
@@ -355,15 +352,40 @@ export default function Home() {
     : accounts.includes(account)
       ? account
       : (accounts[0] ?? '');
-  const excludeUnavailable =
-    !!actualAccount && excludeUnavailableFor === actualAccount;
+  const excludeUnavailable = !!actualAccount && !demo;
   const currentUnavailableProfiles =
     availabilityAccount === actualAccount
       ? unavailableProfiles
       : EMPTY_UNAVAILABLE_PROFILES;
+  const availabilityReviewProfiles = useMemo(
+    () => {
+      const profiles = new Map(
+        currentUnavailableProfiles
+          .filter((profile) => normalizeDeletedAccountMarker(profile.username))
+          .map((profile) => [profile.username, profile]),
+      );
+      for (const snapshot of active) {
+        if (snapshot.account !== actualAccount) continue;
+        for (const username of [...snapshot.followers, ...snapshot.following]) {
+          const marker = normalizeDeletedAccountMarker(username);
+          if (marker && !profiles.has(marker))
+            profiles.set(marker, {
+              username: marker,
+              reason: 'Marcador de cuenta eliminada en la exportación',
+              source: 'automatic',
+              isExcluded: true,
+            });
+        }
+      }
+      return [...profiles.values()].sort((a, b) =>
+        a.username.localeCompare(b.username),
+      );
+    },
+    [active, actualAccount, currentUnavailableProfiles],
+  );
   const profilesToExclude = useMemo(
-    () => getExcludedUnavailableProfiles(currentUnavailableProfiles),
-    [currentUnavailableProfiles],
+    () => getExcludedUnavailableProfiles(availabilityReviewProfiles),
+    [availabilityReviewProfiles],
   );
   useEffect(() => {
     let cancelled = false;
@@ -396,6 +418,13 @@ export default function Home() {
     [active, actualAccount],
   );
   const current = history.find((s) => s.id === selected) ?? history.at(-1);
+  const currentAvailabilityAudit = useMemo(
+    () =>
+      current && !demo
+        ? auditProfileAvailability(current.followers, current.following)
+        : null,
+    [current, demo],
+  );
   const earlier = history.filter((s) => current && s.date < current.date);
   const previous = earlier.find((s) => s.id === baseline) ?? earlier.at(-1);
   const analysisCurrent = useMemo(
@@ -447,7 +476,6 @@ export default function Home() {
       setSavedIds([]);
       setImportAnalysis(null);
       setAccount('');
-      setExcludeUnavailableFor('');
       setSelected('');
       setBaseline('');
       setDemo(false);
@@ -552,12 +580,10 @@ export default function Home() {
       await saveUnavailableProfiles(actualAccount, profiles);
       setUnavailableProfiles(profiles);
       setAvailabilityAccount(actualAccount);
-      setAvailabilityError('');
       setNotice('La lista local de perfiles identificados fue actualizada.');
       return true;
     } catch (err) {
       const message = (err as Error).message;
-      setAvailabilityError(message);
       setError(message);
       return false;
     } finally {
@@ -568,48 +594,17 @@ export default function Home() {
     const existing = currentUnavailableProfiles.find(
       (profile) => profile.username === username,
     );
-    let next: UnavailableProfile[];
-    if (!existing) {
-      next = [
-        ...currentUnavailableProfiles,
-        {
-          username,
-          reason: 'Identificado por vos',
-          source: 'manual' as const,
-          isExcluded: true,
-        },
-      ];
-    } else if (!isUnavailableProfileExcluded(existing)) {
-      next = currentUnavailableProfiles.map((profile) =>
-        profile.username === username
-          ? { ...profile, source: 'manual' as const, isExcluded: true }
-          : profile,
-      );
-    } else if (existing.source === 'automatic') {
-      next = currentUnavailableProfiles.map((profile) =>
-        profile.username === username
-          ? {
-              ...profile,
-              source: 'manual' as const,
-              isExcluded: false,
-              reason: 'Clasificación corregida por vos',
-            }
-          : profile,
-      );
-    } else {
-      next = currentUnavailableProfiles.filter(
-        (profile) => profile.username !== username,
-      );
-    }
+    if (!existing || !normalizeDeletedAccountMarker(existing.username)) return;
+    const next = currentUnavailableProfiles.map((profile) =>
+      profile.username === username
+        ? {
+            ...profile,
+            isExcluded: !isUnavailableProfileExcluded(profile),
+          }
+        : profile,
+    );
     void persistAvailability(
       next.sort((a, b) => a.username.localeCompare(b.username)),
-    );
-  }
-  function forgetUnavailableProfile(username: string) {
-    void persistAvailability(
-      currentUnavailableProfiles.filter(
-        (profile) => profile.username !== username,
-      ),
     );
   }
   function profileAvailabilityDescription(username: string) {
@@ -618,73 +613,19 @@ export default function Home() {
     );
     if (!profile) return 'Historial observado hasta la importación seleccionada.';
     if (!isUnavailableProfileExcluded(profile))
-      return 'Clasificación corregida por vos: esta cuenta se incluirá en el análisis.';
-    const origin =
-      profile.source === 'automatic'
-        ? 'Detectado por FollowLens'
-        : 'Identificado por vos';
-    return `${origin}. Motivo: ${profile.reason}.`;
-  }
-  function updateAvailabilityReason(username: string, reason: string) {
-    setUnavailableProfiles((profiles) =>
-      profiles.map((profile) =>
-        profile.username === username
-          ? { ...profile, reason, source: 'manual' }
-          : profile,
-      ),
-    );
-  }
-  function saveAvailabilityReason(username: string, reason: string) {
-    const next = currentUnavailableProfiles.map((profile) =>
-      profile.username === username
-        ? {
-            ...profile,
-            reason: reason.trim() || 'Identificado por vos',
-            source: 'manual' as const,
-          }
-        : profile,
-    );
-    void persistAvailability(next);
-  }
-  async function addUnavailableProfiles() {
-    const parsed = parseUnavailableUsernames(availabilityInput);
-    if (!parsed.usernames.length || parsed.invalid.length) {
-      setAvailabilityError(
-        parsed.invalid.length
-          ? `No reconocimos estos nombres: ${parsed.invalid.join(', ')}`
-          : 'Pegá al menos un nombre de usuario.',
-      );
-      return;
-    }
-    const merged = new Map(
-      currentUnavailableProfiles.map((profile) => [profile.username, profile]),
-    );
-    for (const username of parsed.usernames) {
-      const existing = merged.get(username);
-      merged.set(username, {
-        username,
-        reason:
-          availabilityReason.trim() ||
-          (existing?.source === 'automatic'
-            ? 'Identificado por vos'
-            : existing?.reason || 'Identificado por vos'),
-        source: 'manual' as const,
-        isExcluded: true,
-      });
-    }
-    const saved = await persistAvailability(
-      [...merged.values()].sort((a, b) => a.username.localeCompare(b.username)),
-    );
-    if (saved) {
-      setAvailabilityInput('');
-      setAvailabilityReason('');
-    }
+      return 'Marcador explícito corregido: el perfil se conserva en el análisis.';
+    return `Marcador explícito ${profile.reason.toLowerCase()}.`;
   }
   async function importSnapshot(
     s: Snapshot,
     persist: boolean,
     analysis?: Record<Group, string[]>,
     detectedUnavailableProfiles: string[] = [],
+    availabilityAudit?: {
+      auditedCount: number;
+      confirmedDeletedUsernames: string[];
+      unconfirmedCount: number;
+    },
   ) {
     if (
       import.meta.env.DEV &&
@@ -713,9 +654,9 @@ export default function Home() {
           existing,
           detectedUnavailableProfiles,
         );
-        await saveUnavailableProfiles(s.account, merged);
         setUnavailableProfiles(merged);
         setAvailabilityAccount(s.account);
+        await saveUnavailableProfiles(s.account, merged);
       } catch {
         automaticDetectionError =
           'FollowLens detectó marcadores de cuentas eliminadas, pero no pudo guardar la lista local en este navegador.';
@@ -725,7 +666,6 @@ export default function Home() {
     setImportAnalysis(analysis ? { snapshotId: s.id, data: analysis } : null);
     setDemo(false);
     setAccount(s.account);
-    setExcludeUnavailableFor('');
     setSelected(s.id);
     setBaseline('');
     setView('overview');
@@ -733,10 +673,14 @@ export default function Home() {
     const importNotice = persist
       ? 'Importación guardada en este navegador.'
       : 'Importación lista. Se conserva solo durante esta sesión.';
+    const resolvedAvailabilityAudit =
+      availabilityAudit ?? auditProfileAvailability(s.followers, s.following);
+    const auditedCount = resolvedAvailabilityAudit.auditedCount;
+    const confirmedCount =
+      resolvedAvailabilityAudit.confirmedDeletedUsernames.length;
+    const unconfirmedCount = resolvedAvailabilityAudit.unconfirmedCount;
     setNotice(
-      detectedUnavailableProfiles.length
-        ? `${importNotice} FollowLens detectó ${count(detectedUnavailableProfiles.length)} marcador${detectedUnavailableProfiles.length === 1 ? '' : 'es'} explícito${detectedUnavailableProfiles.length === 1 ? '' : 's'} de cuenta eliminada.`
-        : importNotice,
+      `${importNotice} Revisión automática: ${count(auditedCount)} perfiles únicos; ${count(confirmedCount)} con marcador explícito excluidos y ${count(unconfirmedCount)} sin confirmación conservados.`,
     );
     setError(automaticDetectionError);
     if (
@@ -1001,7 +945,6 @@ export default function Home() {
                   value={actualAccount}
                   onChange={(v) => {
                     setAccount(v);
-                    setExcludeUnavailableFor('');
                     resetSelection();
                   }}
                   items={accounts.map((a) => ({ value: a, label: `@${a}` }))}
@@ -1044,37 +987,26 @@ export default function Home() {
                 )}
               </div>
             </div>
-            <section className="availability-control" aria-label="Filtro de disponibilidad">
+            <section className="availability-control" aria-label="Auditoría automática de disponibilidad">
               <div className="check-row">
-                <Checkbox
-                  aria-label="Excluir perfiles identificados como no disponibles"
-                  checked={excludeUnavailable}
-                  disabled={demo || profilesToExclude.length === 0}
-                  onCheckedChange={(value) => {
-                    setExcludeUnavailableFor(value === true ? actualAccount : '');
-                    setPage(0);
-                  }}
-                />
+                <ShieldCheck size={17} aria-hidden="true" />
                 <span>
-                  Excluir perfiles identificados como no disponibles
+                  Revisión automática en cada importación
                   <small>
-                    {profilesToExclude.length
-                      ? `${count(profilesToExclude.length)} marcas locales para @${actualAccount}`
-                      : 'Detección limitada a marcadores explícitos; las demás marcas son manuales.'}
+                    {currentAvailabilityAudit
+                      ? `${count(currentAvailabilityAudit.auditedCount)} perfiles revisados · ${count(currentAvailabilityAudit.confirmedDeletedUsernames.filter((name) => profilesToExclude.some((profile) => profile.username === name)).length)} marcadores explícitos excluidos · ${count(currentAvailabilityAudit.unconfirmedCount)} sin confirmar conservados`
+                      : 'Solo las señales explícitas de la exportación se excluyen del análisis.'}
                   </small>
                 </span>
               </div>
               <button
                 className="btn"
-                disabled={demo || availabilityBusy}
+                disabled={demo || availabilityBusy || availabilityReviewProfiles.length === 0}
                 onClick={() => {
-                  setAvailabilityInput('');
-                  setAvailabilityReason('');
-                  setAvailabilityError('');
                   setAvailabilityOpen(true);
                 }}
               >
-                <UserRoundX size={16} /> Gestionar perfiles
+                <UserRoundX size={16} /> Revisar exclusiones
               </button>
             </section>
             <Tabs value={view} onValueChange={(v) => setView(String(v))}>
@@ -1355,7 +1287,6 @@ export default function Home() {
                               <TableHead>Cuenta</TableHead>
                               <TableHead>Relación en esta fecha</TableHead>
                               <TableHead>Detectada en</TableHead>
-                              <TableHead>Marca local</TableHead>
                               <TableHead>
                                 <span className="sr-only">Detalle</span>
                               </TableHead>
@@ -1393,19 +1324,6 @@ export default function Home() {
                                             s.following.includes(name),
                                         )?.date ?? current.date,
                                       )}
-                                </TableCell>
-                                <TableCell>
-                                  <button
-                                    className="icon-button"
-                                    aria-label={`${profilesToExclude.some((profile) => profile.username === name) ? 'Corregir clasificación de' : 'Marcar'} ${name} como no disponible`}
-                                    title={profilesToExclude.some((profile) => profile.username === name) ? 'Incluir en el análisis' : 'Marcar como no disponible'}
-                                    aria-pressed={profilesToExclude.some((profile) => profile.username === name)}
-                                    data-marked={profilesToExclude.some((profile) => profile.username === name)}
-                                    disabled={availabilityBusy || demo}
-                                    onClick={() => toggleUnavailableProfile(name)}
-                                  >
-                                    <UserRoundX size={16} />
-                                  </button>
                                 </TableCell>
                                 <TableCell>
                                   <button
@@ -1720,73 +1638,28 @@ export default function Home() {
       >
         <DialogContent className="modal" showCloseButton={false}>
           {modalHeader(
-            'Perfiles identificados como no disponibles',
-            'FollowLens detecta marcadores explícitos de cuentas eliminadas en la exportación. También podés agregar perfiles y corregir cualquier clasificación. Todo queda en este navegador.',
+            'Marcadores explícitos de cuentas eliminadas',
+            'FollowLens revisa automáticamente todos los seguidores y seguidos. Esta lista muestra solo las señales explícitas detectadas en las exportaciones y excluidas de las métricas.',
           )}
-          <label className="availability-input">
-            Agregar nombres de usuario
-            <textarea
-              rows={4}
-              placeholder="@cuenta1, cuenta2…"
-              value={availabilityInput}
-              onChange={(event) => {
-                setAvailabilityInput(event.target.value);
-                setAvailabilityError('');
-              }}
-            />
-          </label>
-          <label className="availability-input">
-            Motivo (opcional, para todos los nombres que agregues)
-            <input
-              value={availabilityReason}
-              onChange={(event) => setAvailabilityReason(event.target.value)}
-              placeholder="Por ejemplo: perfil suspendido"
-            />
-          </label>
           <small className="subtle">
-            Podés pegarlos separados por espacios, comas o saltos de línea. La
-            detección automática reconoce el marcador explícito <code>__deleted__</code>;
-            no consulta Instagram ni confirma suspensiones o desactivaciones que
-            no estén indicadas en la exportación.
+            Los perfiles sin marcador explícito, privados, renombrados o afectados
+            por errores temporales quedan en el análisis. FollowLens no consulta
+            Instagram ni usa cuentas automatizadas.
           </small>
-          {availabilityError && (
-            <p className="error" role="alert">{availabilityError}</p>
-          )}
-          <button
-            className="btn primary"
-            disabled={availabilityBusy || !availabilityInput.trim()}
-            onClick={() => void addUnavailableProfiles()}
-          >
-            {availabilityBusy ? 'Guardando…' : 'Agregar a la lista'}
-          </button>
           <div className="availability-list" aria-label="Perfiles marcados">
-            {currentUnavailableProfiles.length ? (
-              currentUnavailableProfiles.map((profile) => {
+            {availabilityReviewProfiles.length ? (
+              availabilityReviewProfiles.map((profile) => {
                 const isExcluded = isUnavailableProfileExcluded(profile);
-                const source =
-                  profile.source === 'automatic'
-                    ? 'Detectado por FollowLens'
-                    : 'Identificado por vos';
                 return (
                   <div className="availability-row" key={profile.username}>
                     <span>
                       <strong>@{profile.username}</strong>
                       <small>
-                        {source}
+                        Detectado automáticamente
                         {isExcluded
                           ? ''
-                          : ' · Corregido por vos: se incluirá en el análisis'}
+                          : ' · Corregido para conservarlo en el análisis'}
                       </small>
-                      <input
-                        aria-label={`Motivo de la marca para ${profile.username}`}
-                        value={profile.reason}
-                        onChange={(event) =>
-                          updateAvailabilityReason(profile.username, event.target.value)
-                        }
-                        onBlur={(event) =>
-                          saveAvailabilityReason(profile.username, event.target.value)
-                        }
-                      />
                     </span>
                     <button
                       className="btn"
@@ -1798,22 +1671,13 @@ export default function Home() {
                       disabled={availabilityBusy}
                       onClick={() => toggleUnavailableProfile(profile.username)}
                     >
-                      {isExcluded ? 'Incluir' : 'Excluir'}
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label={`Quitar clasificación de ${profile.username}`}
-                      title="Quitar de la lista local"
-                      disabled={availabilityBusy}
-                      onClick={() => forgetUnavailableProfile(profile.username)}
-                    >
-                      <X size={16} />
+                      {isExcluded ? 'Conservar en el análisis' : 'Aplicar exclusión'}
                     </button>
                   </div>
                 );
               })
             ) : (
-              <p className="subtle">Todavía no hay perfiles identificados.</p>
+              <p className="subtle">Esta importación no contiene marcadores explícitos de eliminación.</p>
             )}
           </div>
         </DialogContent>

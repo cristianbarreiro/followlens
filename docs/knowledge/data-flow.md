@@ -73,7 +73,7 @@ Este documento describe la secuencia técnica del procesamiento de exportaciones
    - Verificación de partes continuas de followers (sin saltos 1 → 3)
                 │
                 ▼
-[Retorno de followers, following, fileCount y detectedUnavailableProfiles]
+[Retorno de followers, following, fileCount, detecciones explícitas y resumen de auditoría de disponibilidad]
 ```
 
 ---

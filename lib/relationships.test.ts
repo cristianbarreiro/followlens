@@ -18,10 +18,10 @@ import {
 import { importFiles } from './importer.ts';
 import { crc32, decompressDeflate } from './zip.ts';
 import {
+  auditProfileAvailability,
   DELETED_ACCOUNT_MARKER_REASON,
   excludedUnavailableProfiles,
   mergeDetectedUnavailableProfiles,
-  parseUnavailableUsernames,
   withoutUnavailableProfiles,
 } from './profile-availability.ts';
 
@@ -133,13 +133,30 @@ test('calculates current relationships', () => {
   assert.deepEqual(d.lost, []);
   assert.deepEqual(d.new, []);
 });
-void test('parses and normalizes a pasted list of locally identified usernames', () => {
-  assert.deepEqual(parseUnavailableUsernames('@Ana, bruno\nANA; bad/name'), {
-    usernames: ['ana', 'bruno'],
-    invalid: ['bad/name'],
+void test('audits all unique followers and followed profiles, retaining unconfirmed accounts', () => {
+  const audit = auditProfileAvailability(
+    ['ana', '__deleted__123', 'privada'],
+    ['ana', 'cuenta_temporal'],
+  );
+  assert.deepEqual(audit, {
+    auditedCount: 4,
+    confirmedDeletedUsernames: ['__deleted__123'],
+    unconfirmedCount: 3,
   });
+  const snapshot = snap(
+    '2026-09-01',
+    ['ana', '__deleted__123', 'privada'],
+    ['ana', 'cuenta_temporal'],
+  );
+  assert.deepEqual(
+    withoutUnavailableProfiles(
+      snapshot,
+      new Set(audit.confirmedDeletedUsernames),
+    ),
+    snap('2026-09-01', ['ana', 'privada'], ['ana', 'cuenta_temporal']),
+  );
 });
-void test('automatic detections preserve manual classifications and corrections', () => {
+void test('automatic detections preserve explicit corrections and ignore unconfirmed manual marks', () => {
   const initial = mergeDetectedUnavailableProfiles([], ['__deleted__123']);
   assert.deepEqual(initial, [
     {
@@ -171,9 +188,19 @@ void test('automatic detections preserve manual classifications and corrections'
   assert.equal(corrected.find((profile) => profile.username === '__deleted__123')?.isExcluded, false);
   assert.equal(corrected.find((profile) => profile.username === '__deleted__123')?.reason, 'La exportación no refleja el estado actual');
   assert.equal(corrected.find((profile) => profile.username === '__deleted__456')?.source, 'automatic');
+  assert.equal(
+    excludedUnavailableProfiles([
+      {
+        username: 'cuenta_manual',
+        reason: 'Identificado por vos',
+        source: 'manual',
+        isExcluded: true,
+      },
+    ]).length,
+    0,
+  );
   assert.deepEqual(excludedUnavailableProfiles(corrected).map((profile) => profile.username), [
     '__deleted__456',
-    'cuenta_manual',
   ]);
 });
 void test('filters unavailable names from both sets without mutating the source snapshot', () => {
