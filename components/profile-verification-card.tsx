@@ -2,6 +2,7 @@
 
 import { ShieldCheck, RefreshCw, UserRoundX, XCircle } from 'lucide-react';
 import type { VerificationSummary, VerificationProgress } from '@/lib/profile-availability/types';
+import { providerRegistry } from '@/lib/profile-availability/registry';
 
 interface ProfileVerificationCardProps {
   summary: VerificationSummary | null;
@@ -49,7 +50,15 @@ export function ProfileVerificationCard({
     auditedCount,
     deletedConfirmedCount,
     unconfirmedCount,
+    excludedCount,
+    activeProviderId,
   } = summary;
+
+  const activeProvider = providerRegistry.get(
+    activeProviderId ?? 'export-evidence',
+  ) ?? providerRegistry.getDefault();
+
+  const effectiveExcluded = excludedCount ?? deletedConfirmedCount;
 
   return (
     <section
@@ -60,14 +69,12 @@ export function ProfileVerificationCard({
         <ShieldCheck size={18} className="text-primary" aria-hidden="true" />
         <div>
           <span className="font-medium">
-            Verificación de perfiles de Instagram
+            Verificación de perfiles · {activeProvider.name}
           </span>
           <small className="block text-muted-foreground mt-0.5">
-            {count(totalIdentified)} perfiles identificados (
-            {totalIdentified > 0
-              ? `${Math.round((auditedCount / totalIdentified) * 100)} % auditados`
-              : '0 %'}
-            ) · {count(deletedConfirmedCount)} eliminados confirmados excluidos ·{' '}
+            {count(totalIdentified)} perfiles procesados ({totalIdentified > 0
+              ? `${Math.round((auditedCount / totalIdentified) * 100)} % cobertura local`
+              : '0 %'}) · {count(effectiveExcluded)} excluidos de métricas ({count(deletedConfirmedCount)} confirmados con marcador) ·{' '}
             {count(unconfirmedCount)} sin confirmar conservados
           </small>
 

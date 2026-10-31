@@ -21,7 +21,7 @@ export type VerificationConfidence = 'high' | 'medium' | 'low' | 'none';
 export interface ProfileVerificationRecord {
   /** Normalized Instagram username (e.g. "john_doe" or "__deleted__123") */
   username: string;
-  /** Verification classification status */
+  /** Verification classification status assigned by provider */
   status: ProfileVerificationStatus;
   /** ISO 8601 timestamp when this verification was performed */
   verifiedAt: string;
@@ -37,8 +37,10 @@ export interface ProfileVerificationRecord {
   metadata?: Record<string, unknown>;
   /** Recommended timestamp for the next review */
   nextCheckAfter?: string;
-  /** User-driven explicit toggle to keep/exclude from metrics (defaults to true for deleted_confirmed) */
+  /** Effective exclusion flag: true if excluded from relationship metrics */
   isExcluded?: boolean;
+  /** Explicit user manual override: distinguishes automatic exclusion from user decision */
+  userOverride?: 'included' | 'excluded';
 }
 
 export interface VerificationOptions {
@@ -74,8 +76,12 @@ export interface ProfileVerificationProvider {
   readonly id: string;
   /** Human-readable name of the provider */
   readonly name: string;
-  /** Description of what this provider checks and its limitations */
+  /** Description of what this provider checks */
   readonly description: string;
+  /** Explanation of the technical source of evidence */
+  readonly sourceOfEvidence: string;
+  /** Explicit limitations and platform boundaries of this provider */
+  readonly limitations: string;
   /** Whether the provider has required credentials or environment to run */
   isAvailable(): boolean;
   /** Whether the provider can inspect the given username */
@@ -112,6 +118,8 @@ export interface VerificationSummary {
   errorCount: number;
   /** Profiles pending initial or scheduled verification */
   pendingCount: number;
+  /** Total profiles currently excluded from relationship metrics */
+  excludedCount: number;
   /** Timestamp of the last verification run */
   lastRunAt?: string;
   /** Active provider identifier used */
@@ -124,4 +132,3 @@ export interface EngineVerificationReport {
   durationMs: number;
   interrupted: boolean;
 }
-

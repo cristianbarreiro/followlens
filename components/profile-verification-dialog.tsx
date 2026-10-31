@@ -10,6 +10,7 @@ import {
   UserX,
   Lock,
   UserRoundCheck,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   Dialog,
@@ -23,6 +24,7 @@ import type {
   ProfileVerificationStatus,
 } from '@/lib/profile-availability/types';
 import { ProfileVerificationEngine } from '@/lib/profile-availability/engine';
+import { providerRegistry } from '@/lib/profile-availability/registry';
 
 interface ProfileVerificationDialogProps {
   open: boolean;
@@ -100,8 +102,12 @@ export function ProfileVerificationDialog({
 }: ProfileVerificationDialogProps) {
   const [filterTab, setFilterTab] = useState<
     'all' | 'excluded' | 'deleted' | 'unconfirmed'
-  >('excluded');
+  >(() => (summary.excludedCount > 0 ? 'excluded' : 'all'));
   const [searchQuery, setSearchQuery] = useState('');
+
+  const activeProvider =
+    providerRegistry.get(summary.activeProviderId ?? 'export-evidence') ??
+    providerRegistry.getDefault();
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
@@ -162,14 +168,20 @@ export function ProfileVerificationDialog({
         </div>
 
         <div className="verification-info-banner">
-          <p>
-            <strong>Reglas de privacidad y límites técnicos oficiales:</strong>{' '}
-            Meta no ofrece una API autorizada para consultar cuentas personales
-            arbitrarias. FollowLens audita todas las cuentas de tus archivos y
-            excluye de las métricas únicamente aquellas con eliminación
-            confirmada (como marcadores <code>__deleted__...</code>). Las cuentas
-            privadas, no confirmadas o con errores temporales se conservan en las
-            estadísticas para no distorsionar tus relaciones.
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-border/50">
+            <span className="font-semibold text-sm flex items-center gap-1.5">
+              <ShieldCheck size={16} className="text-primary" />
+              Proveedor activo: {activeProvider.name}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+              {activeProvider.isAvailable() ? 'Modo local (Offline)' : 'No configurado'}
+            </span>
+          </div>
+          <p className="mb-1 text-xs">
+            <strong>Fuente de evidencia:</strong> {activeProvider.sourceOfEvidence}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            <strong>Límites y alcance:</strong> {activeProvider.limitations}
           </p>
         </div>
 
@@ -215,6 +227,12 @@ export function ProfileVerificationDialog({
             </strong>
           </div>
           <div className="stat-summary-row">
+            <span className="stat-label">Excluidos de las métricas</span>
+            <strong className="stat-value text-destructive">
+              {count(summary.excludedCount ?? excludedCount)}
+            </strong>
+          </div>
+          <div className="stat-summary-row">
             <span className="stat-label">Errores de consulta</span>
             <strong className="stat-value">{count(summary.errorCount)}</strong>
           </div>
@@ -223,7 +241,9 @@ export function ProfileVerificationDialog({
         {/* Progress representation */}
         <div className="verification-progress-section">
           <div className="progress-labels">
-            <span>Confirmación objetiva con certeza</span>
+            <span>
+              Confirmación objetiva con certeza ({count(summary.verifiedCount)} de {count(summary.totalIdentified)})
+            </span>
             <strong>{confirmationPercent} %</strong>
           </div>
           <div
@@ -236,6 +256,7 @@ export function ProfileVerificationDialog({
             />
           </div>
           <small className="subtle">
+            Cobertura local: {count(summary.auditedCount)} de {count(summary.totalIdentified)} perfiles procesados (100 %) ·{' '}
             {lastCheckDate
               ? `Última verificación: ${lastCheckDate}`
               : 'Verificación realizada en la importación'}
@@ -301,6 +322,13 @@ export function ProfileVerificationDialog({
                         <StatusIcon size={12} aria-hidden="true" />
                         {statusMeta.label}
                       </span>
+                      {record.userOverride && (
+                        <span className="badge-override text-xs font-medium text-primary">
+                          {record.userOverride === 'excluded'
+                            ? '(Exclusión manual)'
+                            : '(Inclusión manual)'}
+                        </span>
+                      )}
                     </div>
                     <small className="subtle">
                       {record.reason} · {record.providerId}
@@ -316,7 +344,7 @@ export function ProfileVerificationDialog({
                     disabled={busy}
                     onClick={() => onToggleExclusion(record.username)}
                   >
-                    {isExcluded ? 'Conservar en análisis' : 'Aplicar exclusión'}
+                    {isExcluded ? 'Conservar en análisis' : 'Excluir de métricas'}
                   </button>
                 </div>
               );

@@ -47,6 +47,10 @@ export class OfficialApiProvider implements ProfileVerificationProvider {
   readonly name = 'API Oficial de Instagram (Meta Graph API)';
   readonly description =
     'Consulta la API oficial de Meta (Business Discovery). Limitada por especificación de Meta exclusivamente a perfiles públicos profesionales o de creadores.';
+  readonly sourceOfEvidence =
+    'Respuestas HTTP JSON oficiales desde graph.facebook.com mediante la llamada business_discovery.';
+  readonly limitations =
+    'Meta restringe esta API a cuentas profesionales y de creadores públicas. No permite consultar cuentas personales ni privadas (error #100). No considera fallos de red o de consulta como eliminaciones.';
 
   private config: MetaGraphApiConfig;
 

@@ -1,4 +1,5 @@
 import type { Snapshot } from '../relationships.ts';
+import { normalizeDeletedAccountMarker } from '../relationships.ts';
 import type {
   EngineVerificationReport,
   ProfileVerificationProvider,
@@ -9,10 +10,21 @@ import type {
 } from './types.ts';
 import { providerRegistry } from './registry.ts';
 import { getStaleOrPendingProfiles } from './scheduler.ts';
+import {
+  getVerificationRecords,
+  saveVerificationRecords,
+} from './persistence.ts';
 
 export interface RunEngineOptions extends VerificationOptions {
   providerId?: string;
   provider?: ProfileVerificationProvider;
+}
+
+export interface VerifySnapshotOptions extends VerificationOptions {
+  providerId?: string;
+  provider?: ProfileVerificationProvider;
+  engine?: ProfileVerificationEngine;
+  persist?: boolean;
 }
 
 export class ProfileVerificationEngine {
@@ -20,13 +32,15 @@ export class ProfileVerificationEngine {
 
   /**
    * Evaluates if a profile record should be excluded from relationship statistics.
-   * Conservative rule:
-   * Only 'deleted_confirmed' and 'deactivated_confirmed' are excluded (unless user explicitly toggled isExcluded === false).
-   * All other statuses ('available', 'private', 'unavailable_unconfirmed', 'unknown', 'verification_error') are preserved.
+   *
+   * Separation of concerns:
+   * 1. If an explicit user exclusion preference exists (isExcluded is boolean), the user preference takes precedence.
+   * 2. Otherwise, conservative rule: only 'deleted_confirmed' and 'deactivated_confirmed' are excluded by default.
+   * 3. All other statuses ('available', 'private', 'unavailable_unconfirmed', 'unknown', 'verification_error') are preserved.
    */
   static isRecordExcluded(record: ProfileVerificationRecord): boolean {
-    if (record.isExcluded === false) {
-      return false; // User explicitly preserved this account
+    if (typeof record.isExcluded === 'boolean') {
+      return record.isExcluded;
     }
     return (
       record.status === 'deleted_confirmed' ||
@@ -36,7 +50,7 @@ export class ProfileVerificationEngine {
 
   /**
    * Filters a snapshot's followers and following lists in an immutable way,
-   * removing only confirmed deleted or deactivated profiles.
+   * removing profiles marked as excluded according to engine rules.
    */
   static filterSnapshot(
     snapshot: Snapshot,
@@ -46,6 +60,19 @@ export class ProfileVerificationEngine {
     for (const [username, record] of records.entries()) {
       if (ProfileVerificationEngine.isRecordExcluded(record)) {
         excludedUsernames.add(username);
+      }
+    }
+
+    // Defensive check: if a marker exists in the snapshot that was not in records,
+    // exclude it by default unless an explicit record exists.
+    for (const name of snapshot.followers) {
+      if (!records.has(name) && normalizeDeletedAccountMarker(name)) {
+        excludedUsernames.add(name);
+      }
+    }
+    for (const name of snapshot.following) {
+      if (!records.has(name) && normalizeDeletedAccountMarker(name)) {
+        excludedUsernames.add(name);
       }
     }
 
@@ -80,6 +107,7 @@ export class ProfileVerificationEngine {
     let pendingCount = 0;
     let verifiedCount = 0;
     let auditedCount = 0;
+    let excludedCount = 0;
     let latestTimestamp: string | undefined;
 
     for (const username of allUsernames) {
@@ -90,6 +118,11 @@ export class ProfileVerificationEngine {
       }
 
       auditedCount++;
+
+      if (ProfileVerificationEngine.isRecordExcluded(record)) {
+        excludedCount++;
+      }
+
       if (
         !latestTimestamp ||
         new Date(record.verifiedAt).getTime() >
@@ -146,6 +179,7 @@ export class ProfileVerificationEngine {
       unconfirmedCount,
       errorCount,
       pendingCount,
+      excludedCount,
       lastRunAt: latestTimestamp,
       activeProviderId,
     };
@@ -213,7 +247,6 @@ export class ProfileVerificationEngine {
           signal: internalSignal,
           onProgress: (progress: VerificationProgress) => {
             if (options.onProgress) {
-              // Adjust progress to reflect global total
               const total = uniqueUsernames.length;
               const completedBefore =
                 uniqueUsernames.length - pendingUsernames.length;
@@ -233,6 +266,7 @@ export class ProfileVerificationEngine {
           const previous = existingRecords.get(record.username);
           if (previous && previous.isExcluded !== undefined) {
             record.isExcluded = previous.isExcluded;
+            record.userOverride = previous.userOverride;
           }
           resultMap.set(record.username, record);
         }
@@ -264,4 +298,48 @@ export class ProfileVerificationEngine {
       interrupted,
     };
   }
+}
+
+/**
+ * Convenience function to execute verification directly on a snapshot object.
+ * Extracts unique followers and following, loads existing records for the account,
+ * runs the engine, persists the results and returns the report.
+ */
+export async function verifySnapshot(
+  snapshot: Snapshot,
+  options: VerifySnapshotOptions = {},
+): Promise<EngineVerificationReport> {
+  const engine = options.engine ?? new ProfileVerificationEngine();
+  const allUsernames = Array.from(
+    new Set([...snapshot.followers, ...snapshot.following]),
+  ).sort();
+
+  let existingRecords = options.existingRecords;
+  if (!existingRecords) {
+    existingRecords = new Map<string, ProfileVerificationRecord>();
+    try {
+      const stored = await getVerificationRecords(snapshot.account);
+      for (const record of stored) {
+        existingRecords.set(record.username, record);
+      }
+    } catch {
+      // IndexedDB might not be available or empty; continue with empty map
+    }
+  }
+
+  const report = await engine.verifyAll(allUsernames, {
+    ...options,
+    account: snapshot.account,
+    existingRecords,
+  });
+
+  if (options.persist !== false) {
+    try {
+      await saveVerificationRecords(snapshot.account, report.records);
+    } catch {
+      // Persistence error in environment without IndexedDB is non-fatal
+    }
+  }
+
+  return report;
 }

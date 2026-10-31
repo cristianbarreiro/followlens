@@ -9,10 +9,11 @@ import {
   getStaleOrPendingProfiles,
   legacyToVerificationRecord,
   verificationRecordToLegacy,
+  verifySnapshot,
   type ProfileVerificationRecord,
   type ProfileVerificationProvider,
 } from './profile-availability.ts';
-import type { Snapshot } from './relationships.ts';
+import { analyze, type Snapshot } from './relationships.ts';
 
 void test('ProfileVerificationEngine: verifies 100% of unique usernames and deduplicates followers & following', async () => {
   const engine = new ProfileVerificationEngine();
@@ -196,6 +197,8 @@ void test('Cancellation: engine supports AbortSignal and reports interrupted sta
     id: 'slow-mock',
     name: 'Slow Mock',
     description: 'Simulates slow batching',
+    sourceOfEvidence: 'Test mock stream',
+    limitations: 'Test mock boundaries',
     isAvailable: () => true,
     canVerify: () => true,
     async verify(usernames, options) {
@@ -316,6 +319,8 @@ void test('ProviderRegistry: allows registration, switching default and unregist
     id: 'custom-provider',
     name: 'Custom Provider',
     description: 'Custom test provider',
+    sourceOfEvidence: 'Custom memory records',
+    limitations: 'Test only boundaries',
     isAvailable: () => true,
     canVerify: () => true,
     verify: async (usernames) => ({
@@ -362,4 +367,199 @@ void test('Legacy conversion helpers: cleanly roundtrip between UnavailableProfi
   const backToLegacy = verificationRecordToLegacy(record);
   assert.equal(backToLegacy.username, '__deleted__abc');
   assert.equal(backToLegacy.isExcluded, true);
+});
+
+void test('verifySnapshot(): automates extraction, deduplication, and execution directly from a Snapshot object', async () => {
+  const snapshot: Snapshot = {
+    id: 'snap-1',
+    account: 'test.user',
+    date: '2026-03-01',
+    importedAt: '2026-03-01T10:00:00Z',
+    followers: ['follower_one', 'shared_user', '__deleted__marker1'],
+    following: ['following_one', 'shared_user', '__deleted__marker2'],
+  };
+
+  const report = await verifySnapshot(snapshot, { persist: false });
+
+  // 5 unique accounts total
+  assert.equal(report.summary.totalIdentified, 5);
+  assert.equal(report.summary.auditedCount, 5);
+  assert.equal(report.summary.deletedConfirmedCount, 2);
+  assert.equal(report.summary.unconfirmedCount, 3);
+  assert.equal(report.summary.excludedCount, 2);
+
+  // Check that records contain the accounts
+  const usernames = report.records.map((r) => r.username).sort();
+  assert.deepEqual(usernames, [
+    '__deleted__marker1',
+    '__deleted__marker2',
+    'follower_one',
+    'following_one',
+    'shared_user',
+  ]);
+});
+
+void test('Manual exclusion: decouples user override from provider status without forging deleted_confirmed', async () => {
+  const unconfirmedRecord: ProfileVerificationRecord = {
+    username: 'regular_user',
+    status: 'unavailable_unconfirmed',
+    verifiedAt: new Date().toISOString(),
+    providerId: 'export-evidence',
+    reason: 'Identificado en exportación oficial',
+    confidence: 'low',
+    isExcluded: false,
+  };
+
+  // Initially not excluded
+  assert.equal(ProfileVerificationEngine.isRecordExcluded(unconfirmedRecord), false);
+
+  // User manually excludes this unconfirmed account
+  const userExcludedRecord: ProfileVerificationRecord = {
+    ...unconfirmedRecord,
+    isExcluded: true,
+    userOverride: 'excluded',
+  };
+
+  // Must be recognized as excluded, BUT status must remain 'unavailable_unconfirmed'
+  assert.equal(ProfileVerificationEngine.isRecordExcluded(userExcludedRecord), true);
+  assert.equal(userExcludedRecord.status, 'unavailable_unconfirmed');
+  assert.equal(userExcludedRecord.userOverride, 'excluded');
+
+  // Conversely, user manually keeps an account that has a deleted marker
+  const deletedRecord: ProfileVerificationRecord = {
+    username: '__deleted__marker',
+    status: 'deleted_confirmed',
+    verifiedAt: new Date().toISOString(),
+    providerId: 'export-evidence',
+    reason: 'Marcador explícito',
+    confidence: 'high',
+    isExcluded: false,
+    userOverride: 'included',
+  };
+
+  // Must be recognized as NOT excluded because userOverride is 'included' (isExcluded: false)
+  assert.equal(ProfileVerificationEngine.isRecordExcluded(deletedRecord), false);
+  assert.equal(deletedRecord.status, 'deleted_confirmed');
+  assert.equal(deletedRecord.userOverride, 'included');
+});
+
+void test('User override preservation: re-auditing preserves user overrides across verification runs', async () => {
+  const engine = new ProfileVerificationEngine();
+  const existingRecords = new Map<string, ProfileVerificationRecord>();
+
+  // A previously unconfirmed account that the user manually excluded
+  existingRecords.set('user_a', {
+    username: 'user_a',
+    status: 'unavailable_unconfirmed',
+    verifiedAt: '2026-01-01T00:00:00Z',
+    providerId: 'export-evidence',
+    reason: 'Anterior',
+    confidence: 'low',
+    isExcluded: true,
+    userOverride: 'excluded',
+  });
+
+  // A deleted account that the user manually kept
+  existingRecords.set('__deleted__b', {
+    username: '__deleted__b',
+    status: 'deleted_confirmed',
+    verifiedAt: '2026-01-01T00:00:00Z',
+    providerId: 'export-evidence',
+    reason: 'Anterior',
+    confidence: 'high',
+    isExcluded: false,
+    userOverride: 'included',
+  });
+
+  const report = await engine.verifyAll(['user_a', '__deleted__b', 'user_c'], {
+    existingRecords,
+    forceRecheck: true,
+  });
+
+  const recordA = report.records.find((r) => r.username === 'user_a');
+  assert.ok(recordA);
+  assert.equal(recordA.isExcluded, true);
+  assert.equal(recordA.userOverride, 'excluded');
+
+  const recordB = report.records.find((r) => r.username === '__deleted__b');
+  assert.ok(recordB);
+  assert.equal(recordB.isExcluded, false);
+  assert.equal(recordB.userOverride, 'included');
+
+  const recordC = report.records.find((r) => r.username === 'user_c');
+  assert.ok(recordC);
+  assert.equal(recordC.isExcluded, false);
+  assert.equal(recordC.userOverride, undefined);
+});
+
+void test('filterSnapshot(): correctly filters differential relationship snapshots without mutating originals', () => {
+  const rawCurrent: Snapshot = {
+    id: 'current',
+    account: 'test',
+    date: '2026-03-02',
+    importedAt: '2026-03-02T00:00:00Z',
+    followers: ['u1', 'u2', '__deleted__curr', 'manually_excluded'],
+    following: ['u2', 'u3', '__deleted__curr'],
+  };
+
+  const rawPrevious: Snapshot = {
+    id: 'previous',
+    account: 'test',
+    date: '2026-03-01',
+    importedAt: '2026-03-01T00:00:00Z',
+    followers: ['u1', '__deleted__prev'],
+    following: ['u2', '__deleted__prev'],
+  };
+
+  const records = new Map<string, ProfileVerificationRecord>();
+  records.set('__deleted__curr', {
+    username: '__deleted__curr',
+    status: 'deleted_confirmed',
+    verifiedAt: '2026-03-02T00:00:00Z',
+    providerId: 'export-evidence',
+    reason: 'Deleted marker',
+    confidence: 'high',
+    isExcluded: true,
+  });
+  records.set('manually_excluded', {
+    username: 'manually_excluded',
+    status: 'unavailable_unconfirmed',
+    verifiedAt: '2026-03-02T00:00:00Z',
+    providerId: 'export-evidence',
+    reason: 'Manual user exclusion',
+    confidence: 'low',
+    isExcluded: true,
+    userOverride: 'excluded',
+  });
+  records.set('__deleted__prev', {
+    username: '__deleted__prev',
+    status: 'deleted_confirmed',
+    verifiedAt: '2026-03-01T00:00:00Z',
+    providerId: 'export-evidence',
+    reason: 'Deleted marker',
+    confidence: 'high',
+    isExcluded: true,
+  });
+
+  const filteredCurrent = ProfileVerificationEngine.filterSnapshot(rawCurrent, records);
+  const filteredPrevious = ProfileVerificationEngine.filterSnapshot(rawPrevious, records);
+
+  // Immutability check: raw snapshots are unaffected
+  assert.equal(rawCurrent.followers.length, 4);
+  assert.equal(rawPrevious.followers.length, 2);
+
+  // Filtered followers & following
+  assert.deepEqual(filteredCurrent.followers, ['u1', 'u2']);
+  assert.deepEqual(filteredCurrent.following, ['u2', 'u3']);
+  assert.deepEqual(filteredPrevious.followers, ['u1']);
+  assert.deepEqual(filteredPrevious.following, ['u2']);
+
+  // Relationship analysis with filtered snapshots
+  const analysis = analyze(filteredCurrent, filteredPrevious);
+  assert.deepEqual(analysis.mutuals, ['u2']);
+  assert.deepEqual(analysis.notBack, ['u3']);
+  assert.deepEqual(analysis.fans, ['u1']);
+  assert.deepEqual(analysis.followed, ['u3']);
+  assert.deepEqual(analysis.new, ['u2']);
+  assert.deepEqual(analysis.lost, []);
 });

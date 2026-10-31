@@ -21,7 +21,6 @@ import {
   Trash2,
   Upload,
   Users,
-  UserRoundX,
   X,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -63,7 +62,6 @@ import {
   analyze,
   csvRows,
   labels,
-  normalizeDeletedAccountMarker,
   relationship,
   timeline,
   type Group,
@@ -80,15 +78,12 @@ import {
 } from '@/lib/storage';
 import {
   auditProfileAvailability,
-  excludedUnavailableProfiles as getExcludedUnavailableProfiles,
-  isUnavailableProfileExcluded,
-  mergeDetectedUnavailableProfiles,
-  withoutUnavailableProfiles,
   type UnavailableProfile,
   ProfileVerificationEngine,
   type ProfileVerificationRecord,
-  type VerificationSummary,
   type VerificationProgress,
+  verifySnapshot,
+  providerRegistry,
 } from '@/lib/profile-availability';
 import { ProfileVerificationCard } from '@/components/profile-verification-card';
 import { ProfileVerificationDialog } from '@/components/profile-verification-dialog';
@@ -134,7 +129,6 @@ const changeGroups: Group[] = [
   'lostMutuals',
   'newMutuals',
 ];
-const EMPTY_UNAVAILABLE_PROFILES: UnavailableProfile[] = [];
 const recordReactProfile: ProfilerOnRenderCallback = (
   id,
   phase,
@@ -339,8 +333,8 @@ export default function Home() {
     [detail, setDetail] = useState<string | null>(null),
     [remove, setRemove] = useState<Snapshot | null>(null),
     [busy, setBusy] = useState(false),
-    [unavailableProfiles, setUnavailableProfiles] = useState<UnavailableProfile[]>([]),
-    [availabilityAccount, setAvailabilityAccount] = useState(''),
+    [_unavailableProfiles, setUnavailableProfiles] = useState<UnavailableProfile[]>([]),
+    [_availabilityAccount, setAvailabilityAccount] = useState(''),
     [availabilityOpen, setAvailabilityOpen] = useState(false),
     [availabilityBusy, setAvailabilityBusy] = useState(false),
     [verificationRecords, setVerificationRecords] = useState<ProfileVerificationRecord[]>([]),
@@ -375,40 +369,6 @@ export default function Home() {
       ? account
       : (accounts[0] ?? '');
   const excludeUnavailable = !!actualAccount && !demo;
-  const currentUnavailableProfiles =
-    availabilityAccount === actualAccount
-      ? unavailableProfiles
-      : EMPTY_UNAVAILABLE_PROFILES;
-  const availabilityReviewProfiles = useMemo(
-    () => {
-      const profiles = new Map(
-        currentUnavailableProfiles
-          .filter((profile) => normalizeDeletedAccountMarker(profile.username))
-          .map((profile) => [profile.username, profile]),
-      );
-      for (const snapshot of active) {
-        if (snapshot.account !== actualAccount) continue;
-        for (const username of [...snapshot.followers, ...snapshot.following]) {
-          const marker = normalizeDeletedAccountMarker(username);
-          if (marker && !profiles.has(marker))
-            profiles.set(marker, {
-              username: marker,
-              reason: 'Marcador de cuenta eliminada en la exportación',
-              source: 'automatic',
-              isExcluded: true,
-            });
-        }
-      }
-      return [...profiles.values()].sort((a, b) =>
-        a.username.localeCompare(b.username),
-      );
-    },
-    [active, actualAccount, currentUnavailableProfiles],
-  );
-  const profilesToExclude = useMemo(
-    () => getExcludedUnavailableProfiles(availabilityReviewProfiles),
-    [availabilityReviewProfiles],
-  );
   useEffect(() => {
     let cancelled = false;
     if (!actualAccount || demo) return;
@@ -465,36 +425,23 @@ export default function Home() {
     );
   }, [current, demo, currentUniqueUsernames, recordsMap]);
 
-  const currentAvailabilityAudit = useMemo(
-    () =>
-      current && !demo
-        ? auditProfileAvailability(current.followers, current.following)
-        : null,
-    [current, demo],
-  );
   const earlier = history.filter((s) => current && s.date < current.date);
   const previous = earlier.find((s) => s.id === baseline) ?? earlier.at(-1);
   const analysisCurrent = useMemo(
     () =>
       current && excludeUnavailable
-        ? withoutUnavailableProfiles(
-            current,
-            new Set(profilesToExclude.map((profile) => profile.username)),
-          )
+        ? ProfileVerificationEngine.filterSnapshot(current, recordsMap)
         : current,
     // oxlint-disable-next-line react/react-compiler
-    [current, excludeUnavailable, profilesToExclude],
+    [current, excludeUnavailable, recordsMap],
   );
   const analysisPrevious = useMemo(
     () =>
       previous && excludeUnavailable
-        ? withoutUnavailableProfiles(
-            previous,
-            new Set(profilesToExclude.map((profile) => profile.username)),
-          )
+        ? ProfileVerificationEngine.filterSnapshot(previous, recordsMap)
         : previous,
     // oxlint-disable-next-line react/react-compiler
-    [previous, excludeUnavailable, profilesToExclude],
+    [previous, excludeUnavailable, recordsMap],
   );
   const onAnalysisMeasured =
     import.meta.env.DEV && typeof window !== 'undefined'
@@ -560,27 +507,21 @@ export default function Home() {
     () => {
       const relevant = history.filter((s) => current && s.date <= current.date);
       if (!excludeUnavailable) return relevant;
-      const unavailableSet = new Set(
-        profilesToExclude.map((profile) => profile.username),
-      );
       return relevant.map((snapshot) =>
-        withoutUnavailableProfiles(snapshot, unavailableSet),
+        ProfileVerificationEngine.filterSnapshot(snapshot, recordsMap),
       );
     },
     // oxlint-disable-next-line react/react-compiler
-    [history, current, excludeUnavailable, profilesToExclude],
+    [history, current, excludeUnavailable, recordsMap],
   );
   const displayHistory = useMemo(
     () => {
       if (!excludeUnavailable) return history;
-      const unavailableSet = new Set(
-        profilesToExclude.map((profile) => profile.username),
-      );
       return history.map((snapshot) =>
-        withoutUnavailableProfiles(snapshot, unavailableSet),
+        ProfileVerificationEngine.filterSnapshot(snapshot, recordsMap),
       );
     },
-    [history, excludeUnavailable, profilesToExclude],
+    [history, excludeUnavailable, recordsMap],
   );
   const historical = changeGroups.includes(group);
   const derivedListStartedAt =
@@ -620,51 +561,40 @@ export default function Home() {
     setPage(0);
     setDetail(null);
   }
-  async function persistAvailability(profiles: UnavailableProfile[]) {
-    if (!actualAccount || demo) return false;
-    setAvailabilityBusy(true);
-    try {
-      await saveUnavailableProfiles(actualAccount, profiles);
-      setUnavailableProfiles(profiles);
-      setAvailabilityAccount(actualAccount);
-      setNotice('La lista local de perfiles identificados fue actualizada.');
-      return true;
-    } catch (err) {
-      const message = (err as Error).message;
-      setError(message);
-      return false;
-    } finally {
-      setAvailabilityBusy(false);
-    }
-  }
-  async function runVerification(forceRecheck = false) {
-    if (!actualAccount || demo || !current) return;
+  async function runVerification(forceRecheck = false, targetSnapshot?: Snapshot) {
+    const snap = targetSnapshot ?? current;
+    if (!actualAccount || demo || !snap) return;
     setAvailabilityBusy(true);
     setVerificationProgress(null);
     try {
-      const report = await verificationEngine.verifyAll(currentUniqueUsernames, {
-        account: actualAccount,
-        existingRecords: recordsMap,
+      const report = await verifySnapshot(snap, {
+        engine: verificationEngine,
         forceRecheck,
+        persist: true,
         onProgress: (p) => setVerificationProgress(p),
       });
 
       setVerificationRecords(report.records);
-      await saveVerificationRecords(actualAccount, report.records);
+      setAvailabilityAccount(snap.account);
 
       const legacy = report.records
-        .filter((r) => r.status === 'deleted_confirmed')
+        .filter((r) => ProfileVerificationEngine.isRecordExcluded(r))
         .map((r) => ({
           username: r.username,
           reason: r.reason,
-          source: 'automatic' as const,
-          isExcluded: r.isExcluded ?? true,
+          source: (r.userOverride ? 'manual' : 'automatic') as 'manual' | 'automatic',
+          isExcluded: true,
         }));
       setUnavailableProfiles(legacy);
-      await saveUnavailableProfiles(actualAccount, legacy);
+      await saveUnavailableProfiles(snap.account, legacy);
+
+      const activeProvider = providerRegistry.get(
+        report.summary.activeProviderId ?? 'export-evidence',
+      );
+      const providerName = activeProvider?.name ?? 'Evidencia oficial de exportación';
 
       setNotice(
-        `Verificación completada: ${count(report.summary.auditedCount)} auditados, ${count(report.summary.deletedConfirmedCount)} eliminados confirmados excluidos, ${count(report.summary.unconfirmedCount)} sin confirmar conservados.`,
+        `Verificación completada (${providerName}): ${count(report.summary.auditedCount)} auditados, ${count(report.summary.excludedCount)} excluidos de métricas (${count(report.summary.deletedConfirmedCount)} eliminados confirmados), ${count(report.summary.unconfirmedCount)} sin confirmar conservados.`,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error en la verificación';
@@ -686,16 +616,25 @@ export default function Home() {
     const currentExcluded = existing
       ? ProfileVerificationEngine.isRecordExcluded(existing)
       : false;
+    const nextExcluded = !currentExcluded;
+
     const updatedRecord: ProfileVerificationRecord = existing
-      ? { ...existing, isExcluded: !currentExcluded }
+      ? {
+          ...existing,
+          isExcluded: nextExcluded,
+          userOverride: nextExcluded ? 'excluded' : 'included',
+        }
       : {
           username,
-          status: 'deleted_confirmed',
+          status: 'unknown',
           verifiedAt: new Date().toISOString(),
-          providerId: 'export-evidence',
-          reason: 'Marcador manual o de exportación',
-          confidence: 'high',
-          isExcluded: false,
+          providerId: 'user-preference',
+          reason: nextExcluded
+            ? 'Exclusión manual aplicada por el usuario'
+            : 'Inclusión manual indicada por el usuario',
+          confidence: 'none',
+          isExcluded: nextExcluded,
+          userOverride: nextExcluded ? 'excluded' : 'included',
         };
 
     const nextRecords = verificationRecords.map((r) =>
@@ -708,29 +647,36 @@ export default function Home() {
     await saveVerificationRecords(actualAccount, nextRecords);
 
     const legacy = nextRecords
-      .filter((r) => r.status === 'deleted_confirmed')
+      .filter((r) => ProfileVerificationEngine.isRecordExcluded(r))
       .map((r) => ({
         username: r.username,
         reason: r.reason,
-        source: 'automatic' as const,
-        isExcluded: r.isExcluded ?? true,
+        source: (r.userOverride ? 'manual' : 'automatic') as 'manual' | 'automatic',
+        isExcluded: true,
       }));
     setUnavailableProfiles(legacy);
     await saveUnavailableProfiles(actualAccount, legacy);
-    setNotice(`Preferencia actualizada para @${username}.`);
+    setNotice(
+      nextExcluded
+        ? `Exclusión manual aplicada para @${username}. Se excluye de las métricas.`
+        : `Preferencia actualizada para @${username}. Se conserva en el análisis.`,
+    );
   }
 
-  function toggleUnavailableProfile(username: string) {
-    void toggleVerificationExclusion(username);
-  }
   function profileAvailabilityDescription(username: string) {
-    const profile = currentUnavailableProfiles.find(
-      (item) => item.username === username,
-    );
-    if (!profile) return 'Historial observado hasta la importación seleccionada.';
-    if (!isUnavailableProfileExcluded(profile))
-      return 'Marcador explícito corregido: el perfil se conserva en el análisis.';
-    return `Marcador explícito ${profile.reason.toLowerCase()}.`;
+    const record = recordsMap.get(username);
+    if (!record) return 'Historial observado hasta la importación seleccionada.';
+    const isExcluded = ProfileVerificationEngine.isRecordExcluded(record);
+    if (record.userOverride === 'excluded') {
+      return 'Exclusión manual aplicada por el usuario: perfil excluido de las métricas.';
+    }
+    if (record.userOverride === 'included') {
+      return 'Inclusión manual indicada por el usuario: perfil conservado en las métricas.';
+    }
+    if (isExcluded) {
+      return `Marcador explícito confirmado: ${record.reason.toLowerCase()}.`;
+    }
+    return `Estado verificado: ${record.reason.toLowerCase()}.`;
   }
   async function importSnapshot(
     s: Snapshot,
@@ -759,25 +705,7 @@ export default function Home() {
       await saveSnapshot(s);
       setSavedIds((ids) => [...ids, s.id]);
     }
-    let automaticDetectionError = '';
-    if (detectedUnavailableProfiles.length) {
-      try {
-        const existing =
-          availabilityAccount === s.account
-            ? unavailableProfiles
-            : await getUnavailableProfiles(s.account);
-        const merged = mergeDetectedUnavailableProfiles(
-          existing,
-          detectedUnavailableProfiles,
-        );
-        setUnavailableProfiles(merged);
-        setAvailabilityAccount(s.account);
-        await saveUnavailableProfiles(s.account, merged);
-      } catch {
-        automaticDetectionError =
-          'FollowLens detectó marcadores de cuentas eliminadas, pero no pudo guardar la lista local en este navegador.';
-      }
-    }
+
     setSnapshots((old) => [...old, s]);
     setImportAnalysis(analysis ? { snapshotId: s.id, data: analysis } : null);
     setDemo(false);
@@ -786,19 +714,54 @@ export default function Home() {
     setBaseline('');
     setView('overview');
     setPage(0);
+
     const importNotice = persist
       ? 'Importación guardada en este navegador.'
       : 'Importación lista. Se conserva solo durante esta sesión.';
-    const resolvedAvailabilityAudit =
-      availabilityAudit ?? auditProfileAvailability(s.followers, s.following);
-    const auditedCount = resolvedAvailabilityAudit.auditedCount;
-    const confirmedCount =
-      resolvedAvailabilityAudit.confirmedDeletedUsernames.length;
-    const unconfirmedCount = resolvedAvailabilityAudit.unconfirmedCount;
-    setNotice(
-      `${importNotice} Revisión automática: ${count(auditedCount)} perfiles únicos; ${count(confirmedCount)} con marcador explícito excluidos y ${count(unconfirmedCount)} sin confirmación conservados.`,
-    );
+
+    let verificationNotice = '';
+    let automaticDetectionError = '';
+    try {
+      const report = await verifySnapshot(s, {
+        engine: verificationEngine,
+        forceRecheck: false,
+        persist,
+        onProgress: (p) => setVerificationProgress(p),
+      });
+
+      setVerificationRecords(report.records);
+      setAvailabilityAccount(s.account);
+
+      const legacy = report.records
+        .filter((r) => ProfileVerificationEngine.isRecordExcluded(r))
+        .map((r) => ({
+          username: r.username,
+          reason: r.reason,
+          source: (r.userOverride ? 'manual' : 'automatic') as 'manual' | 'automatic',
+          isExcluded: true,
+        }));
+      setUnavailableProfiles(legacy);
+      if (persist) {
+        await saveUnavailableProfiles(s.account, legacy);
+      }
+
+      const activeProvider = providerRegistry.get(
+        report.summary.activeProviderId ?? 'export-evidence',
+      );
+      const providerName = activeProvider?.name ?? 'Evidencia oficial de exportación';
+
+      verificationNotice = ` Auditoría automática (${providerName}): ${count(report.summary.auditedCount)} perfiles procesados; ${count(report.summary.excludedCount)} excluidos de métricas (${count(report.summary.deletedConfirmedCount)} con marcador explícito) y ${count(report.summary.unconfirmedCount)} sin confirmación conservados.`;
+    } catch {
+      automaticDetectionError =
+        'FollowLens importó los datos, pero ocurrió un problema al verificar perfiles automáticamente.';
+      const resolvedAvailabilityAudit =
+        availabilityAudit ?? auditProfileAvailability(s.followers, s.following);
+      verificationNotice = ` Revisión automática: ${count(resolvedAvailabilityAudit.auditedCount)} perfiles únicos; ${count(resolvedAvailabilityAudit.confirmedDeletedUsernames.length)} con marcador explícito excluidos y ${count(resolvedAvailabilityAudit.unconfirmedCount)} sin confirmación conservados.`;
+    }
+
+    setNotice(`${importNotice}${verificationNotice}`);
     setError(automaticDetectionError);
+
     if (
       import.meta.env.DEV &&
       benchmark?.profileEnabled &&
@@ -1762,6 +1725,7 @@ export default function Home() {
             unconfirmedCount: currentUniqueUsernames.length,
             errorCount: 0,
             pendingCount: 0,
+            excludedCount: 0,
           }
         }
         busy={availabilityBusy}

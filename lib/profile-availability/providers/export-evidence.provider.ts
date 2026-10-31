@@ -15,6 +15,10 @@ export class ExportEvidenceProvider implements ProfileVerificationProvider {
   readonly name = 'Evidencia oficial de exportación';
   readonly description =
     'Audita el 100 % de los perfiles analizando las marcas estructurales presentes en los archivos de exportación oficiales de Instagram.';
+  readonly sourceOfEvidence =
+    'Marcadores estructurales explícitos (__deleted__...) presentes en los archivos oficiales descargados de Meta.';
+  readonly limitations =
+    'Procesamiento 100 % local en el navegador. No realiza consultas de red a Instagram; no puede confirmar la disponibilidad en vivo de perfiles personales ordinarios.';
 
   isAvailable(): boolean {
     return true; // 100% client-side, always available offline without network
@@ -78,7 +82,7 @@ export class ExportEvidenceProvider implements ProfileVerificationProvider {
           verifiedAt: nowIso,
           providerId: this.id,
           reason:
-            'Identificado en la exportación oficial sin marcadores de eliminación. Requiere verificación externa autorizada para confirmar disponibilidad en vivo.',
+            'Identificado en la exportación oficial sin marcadores de eliminación. Disponibilidad en vivo no confirmada externamente.',
           confidence: 'low',
           evidence: 'Present in official export without deletion markers',
           nextCheckAfter: nextCheckIso,
@@ -109,4 +113,3 @@ export class ExportEvidenceProvider implements ProfileVerificationProvider {
     return { records };
   }
 }
-
