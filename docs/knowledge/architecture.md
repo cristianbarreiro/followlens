@@ -41,6 +41,8 @@ app/
 components/
 ├── import-dialog.tsx            ── Modal de carga, validación de inputs (cuenta/fecha) y consentimiento
 ├── hero-demo-video.tsx          ── Reproductor diferido de demo en video/iframe (sin autoplay)
+├── profile-verification-card.tsx ── Tarjeta de control de verificación de perfiles y progreso en dashboard
+├── profile-verification-dialog.tsx ── Modal de auditoría detallada, estadísticas, filtros y anulaciones
 └── ui/                          ── Primitives visuales basados en shadcn/ui (radix / base-ui)
 
 lib/
@@ -49,7 +51,8 @@ lib/
 ├── zip.ts                       ── Lector ZIP selectivo por rangos (EOCD, CD, CRC32, streaming DEFLATE acotado)
 ├── relationships.ts             ── Lógica pura de conjuntos, normalización de usernames, timeline y CSV
 ├── storage.ts                   ── Adaptador de persistencia local en IndexedDB (base 'followlens-local')
-├── profile-availability.ts      ── Auditoría local de todos los usernames; exclusión conservadora de marcadores explícitos
+├── profile-availability.ts      ── Puente retrocompatible y funciones de exclusión/filtrado
+├── profile-availability/        ── Motor desacoplado ProfileVerificationEngine, proveedores, persistencia y scheduler
 ├── demo.ts                      ── Generador de snapshots sintéticos para exploración sin archivos
 ├── utils.ts                     ── Utilidades de concatenación de clases Tailwind (cn)
 └── relationships.test.ts        ── Pruebas unitarias de parsing (JSON/HTML), normalización, análisis e importación

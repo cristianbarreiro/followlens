@@ -2,6 +2,10 @@ import {
   normalizeDeletedAccountMarker,
   type Snapshot,
 } from './relationships.ts';
+import type { ProfileVerificationRecord } from './profile-availability/types.ts';
+
+// Re-export all modern types, engine, providers and registry
+export * from './profile-availability/index.ts';
 
 export type UnavailableProfile = {
   username: string;
@@ -19,7 +23,10 @@ export type ProfileAvailabilityAudit = {
   unconfirmedCount: number;
 };
 
-/** Audits every unique relationship username using export evidence only. */
+/**
+ * Synchronously audits every unique relationship username using export evidence.
+ * Retains 100% compatibility with synchronous importers and unit tests.
+ */
 export function auditProfileAvailability(
   followers: string[],
   following: string[],
@@ -109,5 +116,38 @@ export function withoutUnavailableProfiles(
     ...snapshot,
     followers: snapshot.followers.filter((name) => !usernames.has(name)),
     following: snapshot.following.filter((name) => !usernames.has(name)),
+  };
+}
+
+/**
+ * Converts legacy UnavailableProfile items into modern ProfileVerificationRecord objects.
+ */
+export function legacyToVerificationRecord(
+  profile: UnavailableProfile,
+): ProfileVerificationRecord {
+  const isDeleted = Boolean(normalizeDeletedAccountMarker(profile.username));
+  return {
+    username: profile.username,
+    status: isDeleted ? 'deleted_confirmed' : 'unavailable_unconfirmed',
+    verifiedAt: new Date().toISOString(),
+    providerId: 'export-evidence',
+    reason: profile.reason || (isDeleted ? DELETED_ACCOUNT_MARKER_REASON : 'Sin confirmación'),
+    confidence: isDeleted ? 'high' : 'low',
+    evidence: isDeleted ? `Marker: ${profile.username}` : undefined,
+    isExcluded: profile.isExcluded ?? isDeleted,
+  };
+}
+
+/**
+ * Converts modern ProfileVerificationRecord objects into legacy UnavailableProfile items.
+ */
+export function verificationRecordToLegacy(
+  record: ProfileVerificationRecord,
+): UnavailableProfile {
+  return {
+    username: record.username,
+    reason: record.reason,
+    source: record.providerId === 'manual' ? 'manual' : 'automatic',
+    isExcluded: record.isExcluded ?? (record.status === 'deleted_confirmed' || record.status === 'deactivated_confirmed'),
   };
 }

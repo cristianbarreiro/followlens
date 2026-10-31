@@ -15,6 +15,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
    - Testing & Development: [docs/knowledge/development.md](docs/knowledge/development.md)
    - Selective ZIP Processing (ADR-0004): [docs/knowledge/decisions/0004-incremental-zip-processing.md](docs/knowledge/decisions/0004-incremental-zip-processing.md)
    - Profile Photos Boundary (ADR-0005): [docs/knowledge/decisions/0005-profile-photos.md](docs/knowledge/decisions/0005-profile-photos.md)
+   - Profile Availability & Verification Engine (ADR-0006/0007): [docs/knowledge/decisions/0007-profile-verification-engine.md](docs/knowledge/decisions/0007-profile-verification-engine.md)
 3. **Specialized Skills (.agents/skills/):**
    - ZIP Import & Memory Strategy: [.agents/skills/instagram-zip-import/SKILL.md](.agents/skills/instagram-zip-import/SKILL.md)
    - Verification Standards: [.agents/skills/change-verification/SKILL.md](.agents/skills/change-verification/SKILL.md)
@@ -25,7 +26,7 @@ Operational adapter for Google Gemini and Antigravity IDE. FollowLens uses a sin
 
 ## ⚡ Fast Command Reference
 
-- `npm test`: Run 39 unit tests (`node --test lib/relationships.test.ts`).
+- `npm test`: Run 55 unit tests (`node --test lib/relationships.test.ts lib/profile-availability.test.ts`).
 - `npm run benchmark:importer`: Run synthetic Node.js importer performance scenarios.
 - `npm run benchmark:importer:browser`: Run isolated medium, high-cardinality and near-limit Chromium import scenarios.
 - `npm run benchmark:importer:stages`: Compare DEFLATE/STORE and measure browser import stages.

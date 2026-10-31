@@ -11,7 +11,7 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",
-    "test": "node --test lib/relationships.test.ts",
+    "test": "node --test lib/relationships.test.ts lib/profile-availability.test.ts",
     "test:e2e": "playwright test",
     "benchmark:importer": "node --expose-gc scripts/importer-benchmark.ts",
     "benchmark:importer:browser": "playwright test --config=playwright.browser-benchmark.config.ts",

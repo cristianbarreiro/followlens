@@ -140,9 +140,30 @@ Genera un archivo CSV con codificación UTF-8 con BOM (`\uFEFF`) y columnas esta
 5. `ultima_observacion`: fecha más reciente en que se observó al usuario en el historial.
 6. `fecha_exportacion`: fecha del snapshot activo.
 
-## 8. Auditoría automática de disponibilidad (ADR-0006)
+## 8. Motor de Verificación de Disponibilidad de Perfiles (ADR-0006, ADR-0007)
 
-- En cada importación, `auditProfileAvailability()` recorre todos los usernames únicos de seguidores y seguidos y devuelve cantidades de revisados, confirmados por marcador explícito y sin confirmación.
-- `__deleted__` es la única evidencia automática aceptada y se excluye de forma predeterminada al derivar métricas actuales e históricas. Los perfiles ordinarios, incluidos casos ambiguos, se conservan.
-- La corrección opcional se limita a reincluir un marcador detectado. Las marcas manuales antiguas de cuentas ordinarias no se usan para excluirlas.
-- El filtrado es inmutable y no modifica snapshots. No se consulta Instagram ni se transmiten usernames; la exportación local es la única fuente de evidencia.
+El sistema implementa una arquitectura modular de verificación en dos capas mediante `ProfileVerificationEngine` (`lib/profile-availability/`):
+
+### Cobertura vs. Confirmación
+- **Cobertura de auditoría (100 %):** En cada importación y bajo demanda, el motor recorre la totalidad de los nombres de usuario únicos entre seguidores y seguidos (deduplicando perfiles mutuos).
+- **Confirmación objetiva de estados:** No equipara «perfil examinado» con «disponibilidad confirmada». Solo asigna certeza ante evidencia fehaciente.
+
+### Modelo de Estados Formal (`ProfileVerificationStatus`)
+1. `available`: Accesible y confirmado mediante fuente autorizada.
+2. `deleted_confirmed`: Evidencia demostrable de eliminación (ej. marcador estructural `__deleted__`).
+3. `deactivated_confirmed`: Evidencia demostrable de desactivación temporal.
+4. `suspended_confirmed`: Evidencia verificable de suspensión.
+5. `private`: Perfil existente y privado.
+6. `renamed`: Evidencia fehaciente de cambio de nombre de usuario.
+7. `unavailable_unconfirmed`: Perfil presente en la exportación sin marcadores de eliminación; disponibilidad en vivo sin confirmar externamente.
+8. `unknown`: Evidencia insuficiente para clasificar.
+9. `verification_error`: Fallo técnico, timeout o error de red.
+
+### Registro de Verificación (`ProfileVerificationRecord`)
+Cada resultado almacena: `username`, `status`, `verifiedAt`, `providerId`, `reason`, `confidence` (`'high' | 'medium' | 'low' | 'none'`), `evidence` opcional, `metadata` y `nextCheckAfter` para reintentos planificados.
+
+### Reglas de Exclusión Conservadoras
+- **Exclusión:** Solo los estados `deleted_confirmed` y `deactivated_confirmed` se excluyen de métricas relacionales y comparaciones históricas.
+- **Conservación:** Cuentas `available`, `private`, `unavailable_unconfirmed`, `unknown`, `suspended_confirmed` y `verification_error` permanecen en las estadísticas.
+- **Anulación por el usuario:** El usuario puede alternar la exclusión de cualquier perfil (`isExcluded`), permitiendo recuperar cuentas en cualquier momento.
+- **Inmutabilidad:** Los snapshots originales jamás se modifican; las proyecciones se calculan en memoria.

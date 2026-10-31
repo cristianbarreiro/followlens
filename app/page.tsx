@@ -75,6 +75,8 @@ import {
   saveSnapshot,
   saveUnavailableProfiles,
   deleteSnapshot,
+  getVerificationRecords,
+  saveVerificationRecords,
 } from '@/lib/storage';
 import {
   auditProfileAvailability,
@@ -83,7 +85,13 @@ import {
   mergeDetectedUnavailableProfiles,
   withoutUnavailableProfiles,
   type UnavailableProfile,
+  ProfileVerificationEngine,
+  type ProfileVerificationRecord,
+  type VerificationSummary,
+  type VerificationProgress,
 } from '@/lib/profile-availability';
+import { ProfileVerificationCard } from '@/components/profile-verification-card';
+import { ProfileVerificationDialog } from '@/components/profile-verification-dialog';
 import { demoSnapshots } from '@/lib/demo';
 
 const count = (n: number) => n.toLocaleString('es-UY');
@@ -324,6 +332,9 @@ export default function Home() {
     [availabilityAccount, setAvailabilityAccount] = useState(''),
     [availabilityOpen, setAvailabilityOpen] = useState(false),
     [availabilityBusy, setAvailabilityBusy] = useState(false),
+    [verificationRecords, setVerificationRecords] = useState<ProfileVerificationRecord[]>([]),
+    [verificationProgress, setVerificationProgress] = useState<VerificationProgress | null>(null),
+    [verificationEngine] = useState(() => new ProfileVerificationEngine()),
     [notice, setNotice] = useState(''),
     [error, setError] = useState('');
   useEffect(() => {
@@ -390,10 +401,14 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     if (!actualAccount || demo) return;
-    getUnavailableProfiles(actualAccount)
-      .then((profiles) => {
+    Promise.all([
+      getUnavailableProfiles(actualAccount),
+      getVerificationRecords(actualAccount),
+    ])
+      .then(([profiles, records]) => {
         if (!cancelled) {
           setUnavailableProfiles(profiles);
+          setVerificationRecords(records);
           setAvailabilityAccount(actualAccount);
         }
       })
@@ -418,6 +433,27 @@ export default function Home() {
     [active, actualAccount],
   );
   const current = history.find((s) => s.id === selected) ?? history.at(-1);
+  const currentUniqueUsernames = useMemo(() => {
+    if (!current) return [];
+    return Array.from(new Set([...current.followers, ...current.following])).sort();
+  }, [current]);
+
+  const recordsMap = useMemo(() => {
+    const map = new Map<string, ProfileVerificationRecord>();
+    for (const r of verificationRecords) {
+      map.set(r.username, r);
+    }
+    return map;
+  }, [verificationRecords]);
+
+  const verificationSummary = useMemo(() => {
+    if (!current || demo) return null;
+    return ProfileVerificationEngine.calculateSummary(
+      currentUniqueUsernames,
+      recordsMap,
+    );
+  }, [current, demo, currentUniqueUsernames, recordsMap]);
+
   const currentAvailabilityAudit = useMemo(
     () =>
       current && !demo
@@ -590,22 +626,91 @@ export default function Home() {
       setAvailabilityBusy(false);
     }
   }
+  async function runVerification(forceRecheck = false) {
+    if (!actualAccount || demo || !current) return;
+    setAvailabilityBusy(true);
+    setVerificationProgress(null);
+    try {
+      const report = await verificationEngine.verifyAll(currentUniqueUsernames, {
+        account: actualAccount,
+        existingRecords: recordsMap,
+        forceRecheck,
+        onProgress: (p) => setVerificationProgress(p),
+      });
+
+      setVerificationRecords(report.records);
+      await saveVerificationRecords(actualAccount, report.records);
+
+      const legacy = report.records
+        .filter((r) => r.status === 'deleted_confirmed')
+        .map((r) => ({
+          username: r.username,
+          reason: r.reason,
+          source: 'automatic' as const,
+          isExcluded: r.isExcluded ?? true,
+        }));
+      setUnavailableProfiles(legacy);
+      await saveUnavailableProfiles(actualAccount, legacy);
+
+      setNotice(
+        `Verificación completada: ${count(report.summary.auditedCount)} auditados, ${count(report.summary.deletedConfirmedCount)} eliminados confirmados excluidos, ${count(report.summary.unconfirmedCount)} sin confirmar conservados.`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error en la verificación';
+      setError(`Error al verificar perfiles: ${msg}`);
+    } finally {
+      setAvailabilityBusy(false);
+      setVerificationProgress(null);
+    }
+  }
+
+  function cancelVerification() {
+    verificationEngine.cancel();
+    setAvailabilityBusy(false);
+    setVerificationProgress(null);
+  }
+
+  async function toggleVerificationExclusion(username: string) {
+    const existing = recordsMap.get(username);
+    const currentExcluded = existing
+      ? ProfileVerificationEngine.isRecordExcluded(existing)
+      : false;
+    const updatedRecord: ProfileVerificationRecord = existing
+      ? { ...existing, isExcluded: !currentExcluded }
+      : {
+          username,
+          status: 'deleted_confirmed',
+          verifiedAt: new Date().toISOString(),
+          providerId: 'export-evidence',
+          reason: 'Marcador manual o de exportación',
+          confidence: 'high',
+          isExcluded: false,
+        };
+
+    const nextRecords = verificationRecords.map((r) =>
+      r.username === username ? updatedRecord : r,
+    );
+    if (!nextRecords.some((r) => r.username === username)) {
+      nextRecords.push(updatedRecord);
+    }
+    setVerificationRecords(nextRecords);
+    await saveVerificationRecords(actualAccount, nextRecords);
+
+    const legacy = nextRecords
+      .filter((r) => r.status === 'deleted_confirmed')
+      .map((r) => ({
+        username: r.username,
+        reason: r.reason,
+        source: 'automatic' as const,
+        isExcluded: r.isExcluded ?? true,
+      }));
+    setUnavailableProfiles(legacy);
+    await saveUnavailableProfiles(actualAccount, legacy);
+    setNotice(`Preferencia actualizada para @${username}.`);
+  }
+
   function toggleUnavailableProfile(username: string) {
-    const existing = currentUnavailableProfiles.find(
-      (profile) => profile.username === username,
-    );
-    if (!existing || !normalizeDeletedAccountMarker(existing.username)) return;
-    const next = currentUnavailableProfiles.map((profile) =>
-      profile.username === username
-        ? {
-            ...profile,
-            isExcluded: !isUnavailableProfileExcluded(profile),
-          }
-        : profile,
-    );
-    void persistAvailability(
-      next.sort((a, b) => a.username.localeCompare(b.username)),
-    );
+    void toggleVerificationExclusion(username);
   }
   function profileAvailabilityDescription(username: string) {
     const profile = currentUnavailableProfiles.find(
@@ -987,28 +1092,15 @@ export default function Home() {
                 )}
               </div>
             </div>
-            <section className="availability-control" aria-label="Auditoría automática de disponibilidad">
-              <div className="check-row">
-                <ShieldCheck size={17} aria-hidden="true" />
-                <span>
-                  Revisión automática en cada importación
-                  <small>
-                    {currentAvailabilityAudit
-                      ? `${count(currentAvailabilityAudit.auditedCount)} perfiles revisados · ${count(currentAvailabilityAudit.confirmedDeletedUsernames.filter((name) => profilesToExclude.some((profile) => profile.username === name)).length)} marcadores explícitos excluidos · ${count(currentAvailabilityAudit.unconfirmedCount)} sin confirmar conservados`
-                      : 'Solo las señales explícitas de la exportación se excluyen del análisis.'}
-                  </small>
-                </span>
-              </div>
-              <button
-                className="btn"
-                disabled={demo || availabilityBusy || availabilityReviewProfiles.length === 0}
-                onClick={() => {
-                  setAvailabilityOpen(true);
-                }}
-              >
-                <UserRoundX size={16} /> Revisar exclusiones
-              </button>
-            </section>
+            <ProfileVerificationCard
+              summary={verificationSummary}
+              busy={availabilityBusy}
+              progress={verificationProgress}
+              disabled={demo}
+              onOpenDetails={() => setAvailabilityOpen(true)}
+              onReverify={() => runVerification(true)}
+              onCancel={cancelVerification}
+            />
             <Tabs value={view} onValueChange={(v) => setView(String(v))}>
               <TabsList className="main-tabs" variant="line">
                 <TabsTrigger value="overview">
@@ -1630,58 +1722,46 @@ export default function Home() {
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog
+      <ProfileVerificationDialog
         open={availabilityOpen}
-        onOpenChange={(value) => {
-          if (!value) setAvailabilityOpen(false);
-        }}
-      >
-        <DialogContent className="modal" showCloseButton={false}>
-          {modalHeader(
-            'Marcadores explícitos de cuentas eliminadas',
-            'FollowLens revisa automáticamente todos los seguidores y seguidos. Esta lista muestra solo las señales explícitas detectadas en las exportaciones y excluidas de las métricas.',
-          )}
-          <small className="subtle">
-            Los perfiles sin marcador explícito, privados, renombrados o afectados
-            por errores temporales quedan en el análisis. FollowLens no consulta
-            Instagram ni usa cuentas automatizadas.
-          </small>
-          <div className="availability-list" aria-label="Perfiles marcados">
-            {availabilityReviewProfiles.length ? (
-              availabilityReviewProfiles.map((profile) => {
-                const isExcluded = isUnavailableProfileExcluded(profile);
-                return (
-                  <div className="availability-row" key={profile.username}>
-                    <span>
-                      <strong>@{profile.username}</strong>
-                      <small>
-                        Detectado automáticamente
-                        {isExcluded
-                          ? ''
-                          : ' · Corregido para conservarlo en el análisis'}
-                      </small>
-                    </span>
-                    <button
-                      className="btn"
-                      aria-label={
-                        isExcluded
-                          ? `Incluir ${profile.username} en el análisis`
-                          : `Volver a excluir ${profile.username}`
-                      }
-                      disabled={availabilityBusy}
-                      onClick={() => toggleUnavailableProfile(profile.username)}
-                    >
-                      {isExcluded ? 'Conservar en el análisis' : 'Aplicar exclusión'}
-                    </button>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="subtle">Esta importación no contiene marcadores explícitos de eliminación.</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={setAvailabilityOpen}
+        records={currentUniqueUsernames.map(
+          (u) =>
+            recordsMap.get(u) ?? {
+              username: u,
+              status: 'unavailable_unconfirmed' as const,
+              verifiedAt: new Date().toISOString(),
+              providerId: 'export-evidence',
+              reason: 'Identificado en la exportación oficial',
+              confidence: 'low' as const,
+              isExcluded: false,
+            },
+        )}
+        summary={
+          verificationSummary ?? {
+            totalIdentified: currentUniqueUsernames.length,
+            auditedCount: currentUniqueUsernames.length,
+            verifiedCount: 0,
+            availableCount: 0,
+            deletedConfirmedCount: 0,
+            deactivatedConfirmedCount: 0,
+            suspendedConfirmedCount: 0,
+            privateCount: 0,
+            renamedCount: 0,
+            unconfirmedCount: currentUniqueUsernames.length,
+            errorCount: 0,
+            pendingCount: 0,
+          }
+        }
+        busy={availabilityBusy}
+        onToggleExclusion={toggleVerificationExclusion}
+        onReverify={() => runVerification(true)}
+        lastCheckDate={
+          verificationSummary?.lastRunAt
+            ? fmt(verificationSummary.lastRunAt)
+            : undefined
+        }
+      />
       <Dialog
         open={!!detail}
         onOpenChange={(v) => {

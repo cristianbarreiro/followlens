@@ -1,13 +1,25 @@
-import type { Snapshot } from './relationships';
-import type { UnavailableProfile } from './profile-availability';
+import type { Snapshot } from './relationships.ts';
+import type { UnavailableProfile } from './profile-availability.ts';
+
+export {
+  getVerificationRecords,
+  saveVerificationRecords,
+  clearVerificationRecords,
+} from './profile-availability/persistence.ts';
+
 async function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('followlens-local', 2);
+    const request = indexedDB.open('followlens-local', 3);
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains('snapshots'))
-        request.result.createObjectStore('snapshots', { keyPath: 'id' });
-      if (!request.result.objectStoreNames.contains('unavailableProfiles'))
-        request.result.createObjectStore('unavailableProfiles', {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('snapshots'))
+        db.createObjectStore('snapshots', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('unavailableProfiles'))
+        db.createObjectStore('unavailableProfiles', {
+          keyPath: 'account',
+        });
+      if (!db.objectStoreNames.contains('verificationRecords'))
+        db.createObjectStore('verificationRecords', {
           keyPath: 'account',
         });
     };
