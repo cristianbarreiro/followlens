@@ -187,3 +187,4 @@ export async function saveVerificationRecords(
 export async function clearVerificationRecords(account: string): Promise<void> {
   return saveVerificationRecords(account, []);
 }
+

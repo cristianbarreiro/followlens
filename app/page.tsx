@@ -95,19 +95,30 @@ import { ProfileVerificationDialog } from '@/components/profile-verification-dia
 import { demoSnapshots } from '@/lib/demo';
 
 const count = (n: number) => n.toLocaleString('es-UY');
-const fmt = (date: string) =>
-  new Intl.DateTimeFormat('es-UY', {
+const parseDate = (date: string): Date | null => {
+  if (!date) return null;
+  const d = date.includes('T') ? new Date(date) : new Date(date + 'T12:00:00Z');
+  return isNaN(d.getTime()) ? null : d;
+};
+const fmt = (date: string) => {
+  const d = parseDate(date);
+  if (!d) return date || '';
+  return new Intl.DateTimeFormat('es-UY', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(new Date(date + 'T12:00:00Z'));
-const shortDate = (date: string) =>
-  new Intl.DateTimeFormat('es-UY', {
+  }).format(d);
+};
+const shortDate = (date: string) => {
+  const d = parseDate(date);
+  if (!d) return date || '';
+  return new Intl.DateTimeFormat('es-UY', {
     day: 'numeric',
     month: 'short',
     timeZone: 'UTC',
-  }).format(new Date(date + 'T12:00:00Z'));
+  }).format(d);
+};
 const currentGroups: Group[] = [
   'notBack',
   'fans',

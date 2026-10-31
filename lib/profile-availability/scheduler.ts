@@ -93,3 +93,4 @@ export function calculateNextCheckIso(
       return new Date(now + 14 * 24 * 60 * 60 * 1000).toISOString(); // 14 days
   }
 }
+

@@ -91,3 +91,4 @@ Para garantizar la integridad de las métricas relacionales:
 
 - La interfaz de usuario refleja fielmente la realidad: muestra una cobertura del 100 % de perfiles auditados y desglosa con exactitud el conteo de confirmados vs. perfiles sin confirmación conservados.
 - Las comparaciones históricas y los cálculos diferenciales respetan el mismo criterio conservador en ambas fechas de observación.
+
